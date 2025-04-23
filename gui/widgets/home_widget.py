@@ -143,12 +143,13 @@ class HomeWidget(QWidget):
         # Заголовок журнала
         log_header = QLabel("Журнал активности")
         log_header.setObjectName("header")
+        log_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         log_frame_layout.addWidget(log_header)
 
         # Компонент просмотра логов
         self.log_viewer = LogViewer()
-        self.log_viewer.setFixedHeight(300)
-        log_frame_layout.addWidget(self.log_viewer)
+        self.log_viewer.setMinimumHeight(300)
+        log_frame_layout.addWidget(self.log_viewer, 1)
 
         # Кнопка очистки журнала
         clear_button_layout = QHBoxLayout()
@@ -173,6 +174,7 @@ class HomeWidget(QWidget):
         # Заголовок показателей
         metrics_header = QLabel("Показатели производительности")
         metrics_header.setObjectName("header")
+        metrics_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         metrics_layout.addWidget(metrics_header)
 
         # Содержимое показателей
@@ -204,12 +206,15 @@ class HomeWidget(QWidget):
         self.connection_losses_label.setStyleSheet(f"color: {Styles.COLORS['accent']};")
         metrics_content_layout.addWidget(self.connection_losses_label, 3, 1)
 
-        metrics_layout.addWidget(metrics_content)
+        # Растягиваем сетку показателей вниз, чтобы было выравнивание с журналом
+        metrics_content_layout.setRowStretch(4, 1)
+
+        metrics_layout.addWidget(metrics_content, 1)
 
         # Добавляем показатели в нижний лейаут (занимает 1/3 ширины)
         bottom_layout.addWidget(metrics_frame, 1)
 
-        layout.addLayout(bottom_layout)
+        layout.addLayout(bottom_layout, 1)
 
     def start_bot(self):
         """Запуск бота."""

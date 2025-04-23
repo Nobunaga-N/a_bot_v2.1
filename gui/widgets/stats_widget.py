@@ -141,18 +141,19 @@ class StatsWidget(QWidget):
 
         battles_chart_header = QLabel("Тренд побед и поражений (7 дней)")
         battles_chart_header.setObjectName("header")
+        battles_chart_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         battles_chart_layout.addWidget(battles_chart_header)
 
         # Место для графика побед и поражений
         self.battles_chart_placeholder = QLabel("График будет отображен при наличии данных")
         self.battles_chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.battles_chart_placeholder.setFixedHeight(200)
+        self.battles_chart_placeholder.setMinimumHeight(200)
         self.battles_chart_placeholder.setStyleSheet(f"""
             background-color: {Styles.COLORS['background_medium']};
             color: {Styles.COLORS['text_secondary']};
             border-radius: 4px;
         """)
-        battles_chart_layout.addWidget(self.battles_chart_placeholder)
+        battles_chart_layout.addWidget(self.battles_chart_placeholder, 1)
 
         # Легенда для графика
         chart_legend_layout = QHBoxLayout()
@@ -181,18 +182,19 @@ class StatsWidget(QWidget):
 
         keys_chart_header = QLabel("Сбор ключей (7 дней)")
         keys_chart_header.setObjectName("header")
+        keys_chart_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         keys_chart_layout.addWidget(keys_chart_header)
 
         # Место для графика ключей
         self.keys_chart_placeholder = QLabel("График будет отображен при наличии данных")
         self.keys_chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.keys_chart_placeholder.setFixedHeight(200)
+        self.keys_chart_placeholder.setMinimumHeight(200)
         self.keys_chart_placeholder.setStyleSheet(f"""
             background-color: {Styles.COLORS['background_medium']};
             color: {Styles.COLORS['text_secondary']};
             border-radius: 4px;
         """)
-        keys_chart_layout.addWidget(self.keys_chart_placeholder)
+        keys_chart_layout.addWidget(self.keys_chart_placeholder, 1)
 
         # Легенда для графика ключей
         keys_legend_layout = QHBoxLayout()
@@ -219,6 +221,7 @@ class StatsWidget(QWidget):
 
         daily_stats_header = QLabel("Ежедневная статистика (7 дней)")
         daily_stats_header.setObjectName("header")
+        daily_stats_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         daily_stats_layout.addWidget(daily_stats_header)
 
         # Таблица статистики
@@ -229,7 +232,7 @@ class StatsWidget(QWidget):
             "% побед", "Ключей", "Ключей/победа", "Потерь связи"
         ])
 
-        daily_stats_layout.addWidget(self.daily_stats_table)
+        daily_stats_layout.addWidget(self.daily_stats_table, 1)
 
         scroll_layout.addWidget(daily_stats_frame)
 

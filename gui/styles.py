@@ -391,6 +391,9 @@ class Styles:
                 padding: 15px;
                 font-weight: bold;
                 border-bottom: 1px solid {cls.COLORS["border"]};
+                height: 25px;
+                min-height: 25px;
+                max-height: 25px;
             }}
 
             QFrame#toggle_switch {{
