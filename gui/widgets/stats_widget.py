@@ -1,4 +1,3 @@
-import time
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame,
     QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy
@@ -9,7 +8,7 @@ from PyQt6.QtGui import QFont, QColor
 from gui.styles import Styles
 from gui.components.stat_card import StatCard
 from gui.components.styled_table import StyledTable
-from gui.widgets.chart_widgets import LineChartWidget, BarChartWidget, CombinedChartWidget
+from gui.widgets.chart_widgets import BattlesChartWidget, KeysChartWidget
 
 
 class StatsWidget(QWidget):
@@ -123,26 +122,6 @@ class StatsWidget(QWidget):
         )
         stats_layout.addWidget(self.total_time_card)
 
-        # Добавляем карточку текущей сессии, если бот запущен
-        if self.bot_engine.running.is_set():
-            self.current_session_card = StatCard(
-                "Текущая сессия",
-                "00:00:00",
-                Styles.COLORS["primary"],
-                "time"
-            )
-            stats_layout.addWidget(self.current_session_card)
-        else:
-            # Создаем карточку, но не показываем её
-            self.current_session_card = StatCard(
-                "Текущая сессия",
-                "00:00:00",
-                Styles.COLORS["primary"],
-                "time"
-            )
-            self.current_session_card.setVisible(False)
-            stats_layout.addWidget(self.current_session_card)
-
         # Устанавливаем фиксированную высоту для контейнера карточек
         stats_container = QWidget()
         stats_container.setLayout(stats_layout)
@@ -154,55 +133,25 @@ class StatsWidget(QWidget):
         charts_layout = QHBoxLayout()
         charts_layout.setSpacing(15)
 
-        # График тренда побед и поражений
+        # Создаем виджеты графиков
+        self.battles_chart_widget = BattlesChartWidget()
+        self.keys_chart_widget = KeysChartWidget()
+
+        # Добавляем виджеты графиков в лейаут
         battles_chart_frame = QFrame()
         battles_chart_frame.setObjectName("section_box")
         battles_chart_layout = QVBoxLayout(battles_chart_frame)
         battles_chart_layout.setContentsMargins(0, 0, 0, 0)
         battles_chart_layout.setSpacing(0)
-
-        battles_chart_header = QLabel("Тренд побед и поражений (7 дней)")
-        battles_chart_header.setObjectName("header")
-        battles_chart_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        battles_chart_layout.addWidget(battles_chart_header)
-
-        # Создаем виджет графика побед и поражений
-        battles_line_chart = LineChartWidget()
-        self.battles_chart = CombinedChartWidget(battles_line_chart)
-
-        # Добавляем легенду для графика
-        self.battles_chart.set_legend([
-            ("Победы", Styles.COLORS["secondary"]),
-            ("Поражения", Styles.COLORS["accent"])
-        ])
-
-        battles_chart_layout.addWidget(self.battles_chart, 1)
-
+        battles_chart_layout.addWidget(self.battles_chart_widget)
         charts_layout.addWidget(battles_chart_frame)
 
-        # График сбора ключей
         keys_chart_frame = QFrame()
         keys_chart_frame.setObjectName("section_box")
         keys_chart_layout = QVBoxLayout(keys_chart_frame)
         keys_chart_layout.setContentsMargins(0, 0, 0, 0)
         keys_chart_layout.setSpacing(0)
-
-        keys_chart_header = QLabel("Сбор ключей (7 дней)")
-        keys_chart_header.setObjectName("header")
-        keys_chart_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        keys_chart_layout.addWidget(keys_chart_header)
-
-        # Создаем виджет графика ключей
-        keys_bar_chart = BarChartWidget()
-        self.keys_chart = CombinedChartWidget(keys_bar_chart)
-
-        # Добавляем легенду для графика
-        self.keys_chart.set_legend([
-            ("Собрано ключей", Styles.COLORS["warning"])
-        ])
-
-        keys_chart_layout.addWidget(self.keys_chart, 1)
-
+        keys_chart_layout.addWidget(self.keys_chart_widget)
         charts_layout.addWidget(keys_chart_frame)
 
         scroll_layout.addLayout(charts_layout)
@@ -270,23 +219,7 @@ class StatsWidget(QWidget):
             self.win_rate_card.set_value(f"{win_rate:.1f}%")
 
             self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
-
-            # Форматируем время более красиво
-            total_hours = stats_data.get('total_duration_hours', 0)
-            if total_hours < 0.01:  # Меньше минуты
-                formatted_time = "< 1 мин"
-            elif total_hours < 1:  # Меньше часа
-                minutes = int(total_hours * 60)
-                formatted_time = f"{minutes} мин"
-            else:
-                hours = int(total_hours)
-                minutes = int((total_hours - hours) * 60)
-                if minutes > 0:
-                    formatted_time = f"{hours} ч {minutes} мин"
-                else:
-                    formatted_time = f"{hours} ч"
-
-            self.total_time_card.set_value(formatted_time)
+            self.total_time_card.set_value(f"{stats_data.get('total_duration_hours', 0):.1f} ч")
 
             # Обновляем графики трендов
             self.update_trend_charts()
@@ -294,23 +227,11 @@ class StatsWidget(QWidget):
             # Обновляем таблицу ежедневной статистики
             self.update_daily_stats_table()
 
-            # Если бот сейчас работает, добавляем текущее время работы
-            main_window = self.window()
-            if hasattr(main_window, 'start_time') and main_window.start_time:
-                elapsed_seconds = time.time() - main_window.start_time
-                elapsed_hours = elapsed_seconds / 3600
-
-                # Обновляем карточку с текущим временем
-                if hasattr(self, 'current_session_card'):
-                    hours = int(elapsed_seconds // 3600)
-                    minutes = int((elapsed_seconds % 3600) // 60)
-                    seconds = int(elapsed_seconds % 60)
-                    self.current_session_card.set_value(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-
         except Exception as e:
-            print(f"Ошибка при обновлении статистики: {e}")
+            import logging
+            logging.error(f"Ошибка при обновлении статистики: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.error(traceback.format_exc())
 
     def update_trend_charts(self):
         """Обновляет графики трендов с последними данными."""
@@ -324,28 +245,20 @@ class StatsWidget(QWidget):
 
             # Проверяем, достаточно ли данных для отображения
             if not trend_data or len(trend_data.get("dates", [])) <= 1:
+                # Недостаточно данных - очищаем графики
+                self.battles_chart_widget.clear()
+                self.keys_chart_widget.clear()
                 return
 
-            # Обновляем график побед и поражений
-            battles_chart = self.battles_chart.chart_widget
-            battles_chart.set_data(
-                trend_data["dates"],
-                [trend_data["victories"], trend_data["defeats"]],
-                ["Победы", "Поражения"]
-            )
-
-            # Обновляем график собранных ключей
-            keys_chart = self.keys_chart.chart_widget
-            keys_chart.set_data(
-                trend_data["dates"],
-                trend_data["keys_collected"],
-                Styles.COLORS["warning"]
-            )
+            # Обновляем графики
+            self.battles_chart_widget.update_chart(trend_data)
+            self.keys_chart_widget.update_chart(trend_data)
 
         except Exception as e:
-            print(f"Ошибка при обновлении графиков: {e}")
+            import logging
+            logging.error(f"Ошибка при обновлении графиков: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.error(traceback.format_exc())
 
     def update_daily_stats_table(self):
         """Обновляет таблицу ежедневной статистики."""
@@ -387,10 +300,11 @@ class StatsWidget(QWidget):
                 # Потери связи
                 self.daily_stats_table.setItem(row, 7, QTableWidgetItem(str(day["stats"]["connection_losses"])))
 
-            # Настраиваем цвета ячеек в таблице
+            # Настройка цветовой индикации
             self.daily_stats_table.customize_cell_colors()
 
         except Exception as e:
-            print(f"Ошибка при обновлении таблицы ежедневной статистики: {e}")
+            import logging
+            logging.error(f"Ошибка при обновлении таблицы ежедневной статистики: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.error(traceback.format_exc())

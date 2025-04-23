@@ -1,13 +1,14 @@
 import sys
-import time
 import logging
+import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QApplication, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QLabel, QStatusBar, QMessageBox
+    QLabel, QStatusBar, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QIcon, QPixmap, QAction
 
+from config import config
 from gui.styles import Styles
 from gui.widgets.sidebar_menu import SidebarMenu
 
@@ -61,10 +62,13 @@ class MainWindow(QMainWindow):
         # Время начала работы бота
         self.start_time = None
 
+        # Подключение сигналов между виджетами
+        self.connect_widget_signals()
+
     def init_ui(self):
         """Инициализация компонентов интерфейса."""
         self.setWindowTitle("Age of Magic Бот v2.0")
-        self.setMinimumSize(1200, 830)
+        self.setMinimumSize(1000, 800)
 
         # Центральный виджет
         central_widget = QWidget()
@@ -100,6 +104,37 @@ class MainWindow(QMainWindow):
         # Обновление информации о лицензии в статус-баре
         self.update_license_status()
 
+        # Добавление меню
+        self.create_menu()
+
+    def create_menu(self):
+        """Создание меню приложения."""
+        menu_bar = self.menuBar()
+
+        # Меню "Файл"
+        file_menu = menu_bar.addMenu("Файл")
+
+        # Пункт "Экспорт статистики"
+        export_action = QAction("Экспорт статистики", self)
+        export_action.triggered.connect(self.export_statistics)
+        file_menu.addAction(export_action)
+
+        # Разделитель
+        file_menu.addSeparator()
+
+        # Пункт "Выход"
+        exit_action = QAction("Выход", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Меню "Справка"
+        help_menu = menu_bar.addMenu("Справка")
+
+        # Пункт "О программе"
+        about_action = QAction("О программе", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
     def init_pages(self):
         """Инициализация страниц приложения."""
         # Импортируем все необходимые страницы
@@ -127,6 +162,15 @@ class MainWindow(QMainWindow):
             "settings": 2,
             "license": 3
         }
+
+    def connect_widget_signals(self):
+        """Подключение сигналов между виджетами."""
+        # Подключаем сигнал изменения цели по ключам от настроек к домашнему экрану
+        self.settings_widget.target_keys_changed.connect(self.home_widget.set_target_keys)
+
+        # Загружаем начальное значение цели из конфигурации
+        target_keys = config.get("bot", "target_keys", 1000)
+        self.home_widget.set_target_keys(target_keys)
 
     def change_page(self, page_id):
         """
@@ -184,45 +228,12 @@ class MainWindow(QMainWindow):
 
     def update_runtime(self):
         """Обновляет отображение времени работы."""
-        # Проверяем, работает ли бот
-        bot_running = self.bot_engine.running.is_set()
-
-        if bot_running:
-            # Если бот запущен, но start_time не установлено, инициализируем его
-            if self.start_time is None:
-                self.start_time = time.time()
-
-            # Если у HomeWidget нет start_time, но у MainWindow есть - синхронизируем
-            if not self.home_widget.start_time and self.start_time:
-                self.home_widget.start_time = self.start_time
-
-            # Обновляем отображение времени на главной странице
-            elapsed = int(time.time() - self.start_time)
-            hours = elapsed // 3600
-            minutes = (elapsed % 3600) // 60
-            seconds = elapsed % 60
-
-            # Обновляем время в HomeWidget напрямую
-            self.home_widget.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+        if self.start_time:
+            # Обновление времени работы на главной странице
+            self.home_widget.update_runtime()
 
             # Также обновляем статистику от движка бота
             self.update_stats(self.bot_engine.stats)
-        elif not bot_running and self.start_time is not None:
-            # Если бот не запущен, но start_time установлено, сбрасываем его
-            self.start_time = None
-            self.home_widget.start_time = None
-
-    def init_stats_update_timers(self):
-        """Инициализация таймеров обновления статистики."""
-        # Таймер для обновления времени работы
-        self.stats_timer = QTimer(self)
-        self.stats_timer.timeout.connect(self.update_runtime)
-        self.stats_timer.start(1000)  # Обновление каждую секунду
-
-        # Таймер для автоматического обновления статистики
-        self.stats_update_timer = QTimer(self)
-        self.stats_update_timer.timeout.connect(self.auto_update_statistics)
-        self.stats_update_timer.start(5000)  # Обновление каждые 5 секунд
 
     def refresh_statistics(self):
         """Обновляет все отображения статистики."""
@@ -260,6 +271,97 @@ class MainWindow(QMainWindow):
                     self.refresh_statistics()
                     self._py_logger.debug("Автоматическое обновление статистики выполнено (бот остановлен)")
 
+    def export_statistics(self):
+        """Экспортирует статистику в CSV файл."""
+        # Проверяем, доступен ли stats_manager
+        if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+            QMessageBox.warning(self, "Экспорт невозможен", "Статистика недоступна для экспорта.")
+            return
+
+        # Запрашиваем имя файла для сохранения
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Экспорт статистики",
+            f"AoM_Bot_Stats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+
+        if not filename:
+            return  # Пользователь отменил сохранение
+
+        try:
+            # Получаем данные для экспорта
+            daily_stats = self.bot_engine.stats_manager.get_daily_stats(30)  # Берем статистику за 30 дней
+            total_stats = self.bot_engine.stats_manager.get_total_stats()
+
+            # Создаем CSV файл
+            import csv
+            with open(filename, 'w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+
+                # Записываем заголовок
+                writer.writerow([
+                    "Дата", "Боёв", "Победы", "Поражения", "% побед",
+                    "Ключей собрано", "Ключей за победу", "Потери связи", "Ошибки"
+                ])
+
+                # Записываем ежедневную статистику
+                for day in daily_stats:
+                    battles = day["stats"]["victories"] + day["stats"]["defeats"]
+                    win_rate = day.get("win_rate", 0)
+                    keys_per_victory = day.get("keys_per_victory", 0)
+
+                    writer.writerow([
+                        day["date"],
+                        battles,
+                        day["stats"]["victories"],
+                        day["stats"]["defeats"],
+                        f"{win_rate:.1f}",
+                        day["stats"]["keys_collected"],
+                        f"{keys_per_victory:.1f}",
+                        day["stats"]["connection_losses"],
+                        day["stats"]["errors"]
+                    ])
+
+                # Пустая строка-разделитель
+                writer.writerow([])
+
+                # Записываем итоговую статистику
+                writer.writerow(["ИТОГО:"])
+                battles_total = total_stats["victories"] + total_stats["defeats"]
+                win_rate_total = (total_stats["victories"] / battles_total) * 100 if battles_total > 0 else 0
+                keys_per_victory_total = (total_stats["keys_collected"] / total_stats["victories"]) if total_stats[
+                                                                                                           "victories"] > 0 else 0
+
+                writer.writerow([
+                    "Всего",
+                    battles_total,
+                    total_stats["victories"],
+                    total_stats["defeats"],
+                    f"{win_rate_total:.1f}",
+                    total_stats["keys_collected"],
+                    f"{keys_per_victory_total:.1f}",
+                    total_stats["connection_losses"],
+                    total_stats["errors"]
+                ])
+
+            QMessageBox.information(
+                self,
+                "Экспорт завершен",
+                f"Статистика успешно экспортирована в файл:\n{filename}"
+            )
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при экспорте статистики: {e}")
+            import traceback
+            self._py_logger.error(traceback.format_exc())
+
+            QMessageBox.critical(
+                self,
+                "Ошибка экспорта",
+                f"Не удалось экспортировать статистику: {str(e)}"
+            )
+
     def show_error(self, message):
         """
         Показывает сообщение об ошибке.
@@ -277,6 +379,18 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Лицензия: Действительна (осталось {days_left} дней)")
         else:
             self.statusBar().showMessage("Лицензия: Недействительна или истекла")
+
+    def show_about(self):
+        """Показывает диалог с информацией о программе."""
+        QMessageBox.about(
+            self,
+            "О программе",
+            f"""<h2>Age of Magic Bot v2.0</h2>
+            <p>Бот для автоматизации боев в игре Age of Magic</p>
+            <p>© 2025</p>
+            <p>Все права защищены.</p>
+            <p><b>Технологии:</b> Python, PyQt6, OpenCV</p>"""
+        )
 
     def closeEvent(self, event):
         """Обработка события закрытия окна."""
@@ -302,4 +416,3 @@ class MainWindow(QMainWindow):
             if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager is not None:
                 self.bot_engine.stats_manager.save_stats()
             event.accept()
-

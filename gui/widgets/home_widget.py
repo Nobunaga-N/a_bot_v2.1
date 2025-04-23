@@ -1,6 +1,4 @@
 import time
-import datetime
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QTextEdit, QGridLayout, QSpacerItem, QSizePolicy
@@ -11,10 +9,14 @@ from PyQt6.QtGui import QIcon, QColor, QFont
 from gui.styles import Styles
 from gui.components.stat_card import StatCard
 from gui.components.log_viewer import LogViewer
+from gui.widgets.keys_progress_bar import KeysProgressBar
 
 
 class HomeWidget(QWidget):
     """Главная страница с управлением ботом и основной статистикой."""
+
+    # Целевое количество ключей по умолчанию
+    DEFAULT_TARGET_KEYS = 1000
 
     def __init__(self, bot_engine, signals, parent=None):
         super().__init__(parent)
@@ -23,6 +25,9 @@ class HomeWidget(QWidget):
 
         # Время начала работы бота
         self.start_time = None
+
+        # Цель по количеству ключей (можно изменить через настройки)
+        self.target_keys = self.DEFAULT_TARGET_KEYS
 
         # Инициализация UI
         self.init_ui()
@@ -129,6 +134,24 @@ class HomeWidget(QWidget):
 
         layout.addWidget(stats_container)
 
+        # Прогресс сбора ключей
+        keys_progress_frame = QFrame()
+        keys_progress_frame.setObjectName("section_box")
+        keys_progress_layout = QVBoxLayout(keys_progress_frame)
+        keys_progress_layout.setContentsMargins(0, 0, 0, 0)
+        keys_progress_layout.setSpacing(0)
+
+        # Заголовок индикатора прогресса
+        keys_progress_header = QLabel("Прогресс сбора ключей")
+        keys_progress_header.setObjectName("header")
+        keys_progress_layout.addWidget(keys_progress_header)
+
+        # Виджет прогресса ключей
+        self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=0)
+        keys_progress_layout.addWidget(self.keys_progress_bar)
+
+        layout.addWidget(keys_progress_frame)
+
         # Журнал активности и показатели производительности в две колонки
         bottom_layout = QHBoxLayout()
         bottom_layout.setSpacing(15)
@@ -206,8 +229,14 @@ class HomeWidget(QWidget):
         self.connection_losses_label.setStyleSheet(f"color: {Styles.COLORS['accent']};")
         metrics_content_layout.addWidget(self.connection_losses_label, 3, 1)
 
+        # Ключей в час
+        metrics_content_layout.addWidget(QLabel("Ключей в час:"), 4, 0)
+        self.keys_per_hour_label = QLabel("0")
+        self.keys_per_hour_label.setStyleSheet(f"color: {Styles.COLORS['warning']};")
+        metrics_content_layout.addWidget(self.keys_per_hour_label, 4, 1)
+
         # Растягиваем сетку показателей вниз, чтобы было выравнивание с журналом
-        metrics_content_layout.setRowStretch(4, 1)
+        metrics_content_layout.setRowStretch(5, 1)
 
         metrics_layout.addWidget(metrics_content, 1)
 
@@ -223,15 +252,6 @@ class HomeWidget(QWidget):
             self.stop_button.setEnabled(True)
             self.start_time = time.time()
             self.update_runtime()
-
-            # Если мы находимся в основном окне приложения, синхронизируем время начала
-            if hasattr(self.parent(), 'start_time'):
-                self.parent().start_time = self.start_time
-
-            # Обновляем время начала в главном окне через иерархию родителей
-            main_window = self.window()
-            if hasattr(main_window, 'start_time'):
-                main_window.start_time = self.start_time
 
             # Добавляем запись в журнал
             self.append_log("info", "Бот запущен")
@@ -294,6 +314,9 @@ class HomeWidget(QWidget):
         self.defeats_card.set_value(str(stats.get("defeats", 0)))
         self.keys_card.set_value(str(stats.get("keys_collected", 0)))
 
+        # Обновляем индикатор прогресса ключей
+        self.keys_progress_bar.update_values(stats.get("keys_collected", 0))
+
         # Обновляем показатели
         self.connection_losses_label.setText(str(stats.get("connection_losses", 0)))
 
@@ -314,26 +337,23 @@ class HomeWidget(QWidget):
             self.success_rate_label.setText("0%")
             self.keys_per_victory_label.setText("0")
 
+        # Вычисляем количество ключей в час
+        if self.start_time:
+            elapsed_hours = (time.time() - self.start_time) / 3600
+            if elapsed_hours > 0:
+                keys_per_hour = stats.get("keys_collected", 0) / elapsed_hours
+                self.keys_per_hour_label.setText(f"{keys_per_hour:.1f}")
+            else:
+                self.keys_per_hour_label.setText("0")
+
     def update_runtime(self):
         """Обновляет отображение времени работы бота."""
-        # Если бот запущен, обновляем отображение времени
         if self.start_time:
             elapsed = int(time.time() - self.start_time)
             hours = elapsed // 3600
             minutes = (elapsed % 3600) // 60
             seconds = elapsed % 60
             self.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-        else:
-            # Проверим, не запущен ли бот в MainWindow
-            main_window = self.window()
-            if hasattr(main_window, 'start_time') and main_window.start_time:
-                # Синхронизируем время начала
-                self.start_time = main_window.start_time
-                # Рекурсивно вызываем себя для обновления времени
-                self.update_runtime()
-            else:
-                # Если бот не запущен, показываем нули
-                self.runtime_label.setText("00:00:00")
 
     def append_log(self, level, message):
         """
@@ -348,3 +368,16 @@ class HomeWidget(QWidget):
     def clear_log(self):
         """Очищает журнал."""
         self.log_viewer.clear()
+
+    def set_target_keys(self, target):
+        """
+        Устанавливает цель по количеству ключей.
+
+        Args:
+            target (int): Целевое количество ключей
+        """
+        self.target_keys = target
+        self.keys_progress_bar.update_values(
+            self.bot_engine.stats.get("keys_collected", 0),
+            target=self.target_keys
+        )

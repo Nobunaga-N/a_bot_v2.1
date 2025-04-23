@@ -6,3 +6,4 @@ from gui.widgets.home_widget import HomeWidget
 from gui.widgets.stats_widget import StatsWidget
 from gui.widgets.settings_widget import SettingsWidget
 from gui.widgets.license_widget import LicenseWidget
+from gui.widgets.keys_progress_bar import KeysProgressBar
