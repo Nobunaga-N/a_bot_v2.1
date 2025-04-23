@@ -1,4 +1,5 @@
 import sys
+import time
 import logging
 from PyQt6.QtWidgets import (
     QMainWindow, QApplication, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
@@ -183,12 +184,45 @@ class MainWindow(QMainWindow):
 
     def update_runtime(self):
         """Обновляет отображение времени работы."""
-        if self.start_time:
-            # Обновление времени работы на главной странице
-            self.home_widget.update_runtime()
+        # Проверяем, работает ли бот
+        bot_running = self.bot_engine.running.is_set()
+
+        if bot_running:
+            # Если бот запущен, но start_time не установлено, инициализируем его
+            if self.start_time is None:
+                self.start_time = time.time()
+
+            # Если у HomeWidget нет start_time, но у MainWindow есть - синхронизируем
+            if not self.home_widget.start_time and self.start_time:
+                self.home_widget.start_time = self.start_time
+
+            # Обновляем отображение времени на главной странице
+            elapsed = int(time.time() - self.start_time)
+            hours = elapsed // 3600
+            minutes = (elapsed % 3600) // 60
+            seconds = elapsed % 60
+
+            # Обновляем время в HomeWidget напрямую
+            self.home_widget.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
 
             # Также обновляем статистику от движка бота
             self.update_stats(self.bot_engine.stats)
+        elif not bot_running and self.start_time is not None:
+            # Если бот не запущен, но start_time установлено, сбрасываем его
+            self.start_time = None
+            self.home_widget.start_time = None
+
+    def init_stats_update_timers(self):
+        """Инициализация таймеров обновления статистики."""
+        # Таймер для обновления времени работы
+        self.stats_timer = QTimer(self)
+        self.stats_timer.timeout.connect(self.update_runtime)
+        self.stats_timer.start(1000)  # Обновление каждую секунду
+
+        # Таймер для автоматического обновления статистики
+        self.stats_update_timer = QTimer(self)
+        self.stats_update_timer.timeout.connect(self.auto_update_statistics)
+        self.stats_update_timer.start(5000)  # Обновление каждые 5 секунд
 
     def refresh_statistics(self):
         """Обновляет все отображения статистики."""
@@ -268,3 +302,4 @@ class MainWindow(QMainWindow):
             if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager is not None:
                 self.bot_engine.stats_manager.save_stats()
             event.accept()
+

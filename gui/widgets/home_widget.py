@@ -224,6 +224,15 @@ class HomeWidget(QWidget):
             self.start_time = time.time()
             self.update_runtime()
 
+            # Если мы находимся в основном окне приложения, синхронизируем время начала
+            if hasattr(self.parent(), 'start_time'):
+                self.parent().start_time = self.start_time
+
+            # Обновляем время начала в главном окне через иерархию родителей
+            main_window = self.window()
+            if hasattr(main_window, 'start_time'):
+                main_window.start_time = self.start_time
+
             # Добавляем запись в журнал
             self.append_log("info", "Бот запущен")
 
@@ -307,12 +316,24 @@ class HomeWidget(QWidget):
 
     def update_runtime(self):
         """Обновляет отображение времени работы бота."""
+        # Если бот запущен, обновляем отображение времени
         if self.start_time:
             elapsed = int(time.time() - self.start_time)
             hours = elapsed // 3600
             minutes = (elapsed % 3600) // 60
             seconds = elapsed % 60
             self.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+        else:
+            # Проверим, не запущен ли бот в MainWindow
+            main_window = self.window()
+            if hasattr(main_window, 'start_time') and main_window.start_time:
+                # Синхронизируем время начала
+                self.start_time = main_window.start_time
+                # Рекурсивно вызываем себя для обновления времени
+                self.update_runtime()
+            else:
+                # Если бот не запущен, показываем нули
+                self.runtime_label.setText("00:00:00")
 
     def append_log(self, level, message):
         """

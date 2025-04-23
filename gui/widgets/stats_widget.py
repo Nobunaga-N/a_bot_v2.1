@@ -1,3 +1,4 @@
+import time
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame,
     QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy
@@ -121,6 +122,26 @@ class StatsWidget(QWidget):
             "time"
         )
         stats_layout.addWidget(self.total_time_card)
+
+        # Добавляем карточку текущей сессии, если бот запущен
+        if self.bot_engine.running.is_set():
+            self.current_session_card = StatCard(
+                "Текущая сессия",
+                "00:00:00",
+                Styles.COLORS["primary"],
+                "time"
+            )
+            stats_layout.addWidget(self.current_session_card)
+        else:
+            # Создаем карточку, но не показываем её
+            self.current_session_card = StatCard(
+                "Текущая сессия",
+                "00:00:00",
+                Styles.COLORS["primary"],
+                "time"
+            )
+            self.current_session_card.setVisible(False)
+            stats_layout.addWidget(self.current_session_card)
 
         # Устанавливаем фиксированную высоту для контейнера карточек
         stats_container = QWidget()
@@ -249,13 +270,42 @@ class StatsWidget(QWidget):
             self.win_rate_card.set_value(f"{win_rate:.1f}%")
 
             self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
-            self.total_time_card.set_value(f"{stats_data.get('total_duration_hours', 0):.1f} ч")
+
+            # Форматируем время более красиво
+            total_hours = stats_data.get('total_duration_hours', 0)
+            if total_hours < 0.01:  # Меньше минуты
+                formatted_time = "< 1 мин"
+            elif total_hours < 1:  # Меньше часа
+                minutes = int(total_hours * 60)
+                formatted_time = f"{minutes} мин"
+            else:
+                hours = int(total_hours)
+                minutes = int((total_hours - hours) * 60)
+                if minutes > 0:
+                    formatted_time = f"{hours} ч {minutes} мин"
+                else:
+                    formatted_time = f"{hours} ч"
+
+            self.total_time_card.set_value(formatted_time)
 
             # Обновляем графики трендов
             self.update_trend_charts()
 
             # Обновляем таблицу ежедневной статистики
             self.update_daily_stats_table()
+
+            # Если бот сейчас работает, добавляем текущее время работы
+            main_window = self.window()
+            if hasattr(main_window, 'start_time') and main_window.start_time:
+                elapsed_seconds = time.time() - main_window.start_time
+                elapsed_hours = elapsed_seconds / 3600
+
+                # Обновляем карточку с текущим временем
+                if hasattr(self, 'current_session_card'):
+                    hours = int(elapsed_seconds // 3600)
+                    minutes = int((elapsed_seconds % 3600) // 60)
+                    seconds = int(elapsed_seconds % 60)
+                    self.current_session_card.set_value(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
 
         except Exception as e:
             print(f"Ошибка при обновлении статистики: {e}")
