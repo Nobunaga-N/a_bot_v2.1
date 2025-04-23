@@ -320,8 +320,34 @@ class LicenseActivationCard(QFrame):
             # Очищаем поле ввода
             self.license_key_input.clear()
 
-            # Вызываем обновление информации о лицензии в родительском виджете
-            self.parent().update_license_info()
+            # Поиск LicenseWidget в иерархии родителей
+            from gui.widgets.license_widget import LicenseWidget
+            parent = self.parent()
+            license_widget = None
+
+            # Ищем родительский виджет типа LicenseWidget
+            while parent:
+                if isinstance(parent, LicenseWidget):
+                    license_widget = parent
+                    break
+                parent = parent.parent()
+
+            # Если нашли LicenseWidget, обновляем информацию о лицензии
+            if license_widget and hasattr(license_widget, 'update_license_info'):
+                license_widget.update_license_info()
+
+            # Ищем главное окно для обновления статуса лицензии
+            from gui.main_window import MainWindow
+            parent = self.parent()
+            while parent:
+                if isinstance(parent, MainWindow):
+                    # Обновляем статус лицензии в MainWindow
+                    parent.update_license_status()
+                    # Отправляем сигнал об обновлении лицензии
+                    if hasattr(parent, 'signals'):
+                        parent.signals.license_updated.emit()
+                    break
+                parent = parent.parent()
         else:
             QMessageBox.critical(
                 self,
@@ -510,3 +536,9 @@ class LicenseWidget(QWidget):
 
         # Обновляем карточку с информацией
         self.license_info_card.update_license_info(license_info)
+
+        # Логируем обновление информации о лицензии
+        import logging
+        logger = logging.getLogger("BotLogger")
+        status = license_info.get("status", "неизвестно")
+        logger.debug(f"Обновлена информация о лицензии. Статус: {status}")

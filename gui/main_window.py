@@ -1,5 +1,6 @@
 import sys
 import logging
+import time
 import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QApplication, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
@@ -20,6 +21,7 @@ class BotSignals(QObject):
     log_message = pyqtSignal(str, str)  # level, message
     error = pyqtSignal(str)
     stats_updated = pyqtSignal(dict)
+    license_updated = pyqtSignal()  # Новый сигнал для обновления лицензии
 
 
 class MainWindow(QMainWindow):
@@ -40,28 +42,19 @@ class MainWindow(QMainWindow):
         self.signals.log_message.connect(self.append_log)
         self.signals.error.connect(self.show_error)
         self.signals.stats_updated.connect(self.update_stats)
+        self.signals.license_updated.connect(self.on_license_updated)  # Подключаем новый сигнал
 
         # Установка сигналов бота
         self.bot_engine.set_signals(self.signals)
-
-        # Инициализация UI
-        self.init_ui()
-
-        # Таймер для обновления времени работы
-        self.stats_timer = QTimer(self)
-        self.stats_timer.timeout.connect(self.update_runtime)
-        self.stats_timer.start(1000)  # Обновление каждую секунду
-
-        # Таймер для автоматического обновления статистики
-        self.stats_update_timer = QTimer(self)
-        self.stats_update_timer.timeout.connect(self.auto_update_statistics)
-        self.stats_update_timer.start(5000)  # Обновление каждые 5 секунд
 
         # Переменная для отслеживания изменений в статистике
         self.last_stats_hash = ""
 
         # Время начала работы бота
         self.start_time = None
+
+        # Инициализация UI (таймеры будут созданы внутри)
+        self.init_ui()
 
         # Подключение сигналов между виджетами
         self.connect_widget_signals()
@@ -108,6 +101,20 @@ class MainWindow(QMainWindow):
         # Добавление меню
         self.create_menu()
 
+        # Инициализируем таймеры ПЕРЕД переключением на главную страницу
+        # Таймер для обновления времени работы
+        self.stats_timer = QTimer(self)
+        self.stats_timer.timeout.connect(self.update_runtime)
+        self.stats_timer.start(1000)  # Обновление каждую секунду
+
+        # Таймер для автоматического обновления статистики
+        self.stats_update_timer = QTimer(self)
+        self.stats_update_timer.timeout.connect(self.auto_update_statistics)
+        self.stats_update_timer.start(5000)  # Обновление каждые 5 секунд
+
+        # ТЕПЕРЬ можно безопасно переключиться на главную страницу
+        self.stack.setCurrentIndex(self.page_indices.get("home", 0))
+
     def create_menu(self):
         """Создание меню приложения."""
         menu_bar = self.menuBar()
@@ -146,7 +153,13 @@ class MainWindow(QMainWindow):
         from gui.widgets.log_widget import LogWidget
 
         # Создаём экземпляры страниц
-        self.home_widget = HomeWidget(self.bot_engine, self.signals)
+        # Важно: передаем валидатор лицензии в HomeWidget
+        self.home_widget = HomeWidget(
+            self.bot_engine,
+            self.signals,
+            license_validator=self.license_validator,
+            parent=self
+        )
         self.stats_widget = StatsWidget(self.bot_engine)
         self.log_widget = LogWidget()
         self.settings_widget = SettingsWidget(self.bot_engine)
@@ -187,18 +200,29 @@ class MainWindow(QMainWindow):
         if page_id in self.page_indices:
             self.stack.setCurrentIndex(self.page_indices[page_id])
 
+            # Если есть боковое меню, синхронизируем активную страницу
+            if hasattr(self, 'sidebar'):
+                # Это гарантирует, что боковое меню показывает правильную активную страницу
+                buttons = getattr(self.sidebar, 'buttons', {})
+                if page_id in buttons:
+                    self.sidebar.active_page = page_id
+                    for p, button in buttons.items():
+                        button.setChecked(p == page_id)
+
             # Обновляем статистику при переходе на страницу статистики
             if page_id == "stats":
                 self.refresh_statistics()
                 # Более частое обновление на странице статистики
-                self.stats_update_timer.stop()
-                self.stats_update_timer.setInterval(1000)
-                self.stats_update_timer.start()
+                if hasattr(self, 'stats_update_timer'):
+                    self.stats_update_timer.stop()
+                    self.stats_update_timer.setInterval(1000)
+                    self.stats_update_timer.start()
             else:
                 # Стандартный интервал обновления для других страниц
-                self.stats_update_timer.stop()
-                self.stats_update_timer.setInterval(5000)
-                self.stats_update_timer.start()
+                if hasattr(self, 'stats_update_timer'):
+                    self.stats_update_timer.stop()
+                    self.stats_update_timer.setInterval(5000)
+                    self.stats_update_timer.start()
 
     def update_bot_state(self, state):
         """
@@ -386,14 +410,32 @@ class MainWindow(QMainWindow):
         """
         QMessageBox.critical(self, "Ошибка", message)
 
+    def on_license_updated(self):
+        """Обработчик обновления лицензии."""
+        # Обновляем статус лицензии в статус-баре
+        self.update_license_status()
+
+        # Обновляем интерфейс HomeWidget для отражения нового статуса лицензии
+        if hasattr(self, 'home_widget'):
+            self.home_widget.update_license_status()
+
+        # Обновляем интерфейс LicenseWidget
+        if hasattr(self, 'license_widget'):
+            self.license_widget.update_license_info()
+
+        # Логируем изменение
+        self._py_logger.debug("Статус лицензии обновлен во всех компонентах интерфейса")
+
     def update_license_status(self):
         """Обновляет статус лицензии в статус-баре."""
         if self.license_validator.is_license_valid():
             license_info = self.license_validator.get_license_info()
             days_left = license_info.get("days_left", 0)
             self.statusBar().showMessage(f"Лицензия: Действительна (осталось {days_left} дней)")
+            self._py_logger.info(f"Статус лицензии: Действительна (осталось {days_left} дней)")
         else:
             self.statusBar().showMessage("Лицензия: Недействительна или истекла")
+            self._py_logger.info("Статус лицензии: Недействительна или истекла")
 
     def show_about(self):
         """Показывает диалог с информацией о программе."""

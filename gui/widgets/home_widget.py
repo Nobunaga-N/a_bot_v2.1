@@ -17,10 +17,15 @@ class HomeWidget(QWidget):
     # Целевое количество ключей по умолчанию
     DEFAULT_TARGET_KEYS = 1000
 
-    def __init__(self, bot_engine, signals, parent=None):
+    def __init__(self, bot_engine, signals, license_validator=None, parent=None):
         super().__init__(parent)
         self.bot_engine = bot_engine
         self.signals = signals
+        self.license_validator = license_validator  # Добавляем валидатор лицензии
+
+        # Добавляем логгер
+        import logging
+        self._py_logger = logging.getLogger("BotLogger")
 
         # Время начала работы бота
         self.start_time = None
@@ -30,6 +35,53 @@ class HomeWidget(QWidget):
 
         # Инициализация UI
         self.init_ui()
+
+    def start_bot(self):
+        """Запуск бота."""
+        # Проверяем лицензию перед запуском, если валидатор доступен
+        try:
+            if self.license_validator:
+                self._py_logger.info("Проверка лицензии перед запуском бота...")
+                if not self.license_validator.is_license_valid():
+                    self._py_logger.warning("Лицензия недействительна, запуск бота невозможен")
+                    # Показываем сообщение о необходимости активации лицензии
+                    from PyQt6.QtWidgets import QMessageBox
+                    result = QMessageBox.warning(
+                        self,
+                        "Требуется активация лицензии",
+                        "Для запуска бота необходимо активировать лицензию. "
+                        "Перейти на страницу активации лицензии?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
+                    )
+
+                    if result == QMessageBox.StandardButton.Yes:
+                        # Попробуем найти родительское окно и переключиться на страницу лицензии
+                        from gui.main_window import MainWindow
+                        parent = self.parent()
+                        while parent:
+                            if isinstance(parent, MainWindow):
+                                parent.change_page("license")
+                                break
+                            parent = parent.parent()
+
+                    return False
+                else:
+                    self._py_logger.info("Лицензия действительна, запуск бота разрешен")
+            else:
+                self._py_logger.warning("Валидатор лицензии не доступен!")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при проверке лицензии: {e}")
+
+        # Если лицензия валидна или не требуется проверка, запускаем бота
+        if self.bot_engine.start():
+            self.start_button.setEnabled(False)
+            self.stop_button.setEnabled(True)
+            self.start_time = time.time()
+            self.update_runtime()
+            return True
+
+        return False
 
     def init_ui(self):
         """Инициализация интерфейса главной страницы."""
@@ -205,20 +257,13 @@ class HomeWidget(QWidget):
         metrics_layout.addWidget(metrics_content, 1)
         layout.addWidget(metrics_frame, 1)
 
-    def start_bot(self):
-        """Запуск бота."""
-        if self.bot_engine.start():
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            # Инициализируем время запуска
-            self.start_time = time.time()
-            # Сразу обновляем отображение
-            self.update_runtime()
-            return True
-        return False
-
     def stop_bot(self):
         """Остановка бота."""
+        # Даже при остановке проверяем лицензию для согласованности
+        if self.license_validator and not self.license_validator.is_license_valid():
+            self._py_logger.warning("Попытка остановить бота с недействительной лицензией")
+            # Останавливаем в любом случае, но логируем
+
         if self.bot_engine.stop():
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
@@ -226,6 +271,9 @@ class HomeWidget(QWidget):
 
             # Обновляем статистику
             self.update_stats(self.bot_engine.stats)
+            return True
+
+        return False
 
     def update_bot_state(self, state):
         """
@@ -339,3 +387,24 @@ class HomeWidget(QWidget):
             self.bot_engine.stats.get("keys_collected", 0),
             target=self.target_keys
         )
+
+    def update_license_status(self):
+        """Обновляет элементы интерфейса в зависимости от статуса лицензии."""
+        if not self.license_validator:
+            return
+
+        is_valid = self.license_validator.is_license_valid()
+
+        # Обновление состояния кнопки запуска бота
+        self.start_button.setEnabled(not self.bot_engine.running.is_set())
+
+        # Логирование обновления статуса лицензии
+        self._py_logger.debug(
+            f"Обновление статуса лицензии в HomeWidget: {'действительна' if is_valid else 'недействительна'}")
+
+        # Если нужно, можно добавить визуальные индикаторы статуса лицензии
+        # Например, изменить текст подсказки для кнопки запуска
+        if is_valid:
+            self.start_button.setToolTip("Запустить бота")
+        else:
+            self.start_button.setToolTip("Для запуска бота требуется активировать лицензию")
