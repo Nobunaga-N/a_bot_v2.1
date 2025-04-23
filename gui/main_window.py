@@ -232,13 +232,23 @@ class MainWindow(QMainWindow):
         self.home_widget.update_stats(stats)
 
     def update_runtime(self):
-        """Обновляет отображение времени работы."""
-        if self.start_time:
+        """Обновляет отображение времени работы бота."""
+        # Проверяем, запущен ли бот
+        if self.bot_engine.running.is_set():
+            # Убедимся, что start_time инициализирован в home_widget
+            if self.home_widget.start_time is None:
+                self.home_widget.start_time = time.time()
+
             # Обновление времени работы на главной странице
             self.home_widget.update_runtime()
 
             # Также обновляем статистику от движка бота
             self.update_stats(self.bot_engine.stats)
+        else:
+            # Если бот не запущен, но start_time есть - сбрасываем его
+            if hasattr(self.home_widget, 'start_time') and self.home_widget.start_time is not None:
+                self.home_widget.start_time = None
+                self.home_widget.update_runtime()
 
     def refresh_statistics(self):
         """Обновляет все отображения статистики."""

@@ -291,11 +291,13 @@ class StatsManager:
             List of daily statistics dictionaries
         """
         daily_stats = []
-        now = datetime.datetime.now()
+        # Используем current_date для однозначного определения текущей даты
+        current_date = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Initialize empty data for each day
         for i in range(days):
-            date = now - datetime.timedelta(days=i)
+            # Создаем дату, начиная с текущего дня (i=0) и назад
+            date = current_date - datetime.timedelta(days=i)
             day_data = {
                 "date": date.strftime("%Y-%m-%d"),
                 "display_date": date.strftime("%d.%m"),
@@ -306,11 +308,18 @@ class StatsManager:
         # Process history records
         for record in self.history:
             try:
+                # Преобразуем время окончания в объект datetime
                 end_time = datetime.datetime.fromisoformat(record["end_time"])
-                days_ago = (now - end_time).days
 
-                if 0 <= days_ago < days:
-                    day_index = days_ago
+                # Приводим к началу дня для корректного сравнения дат
+                end_date = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                # Считаем разницу в днях между текущей датой и датой записи
+                days_difference = (current_date - end_date).days
+
+                # Если запись попадает в запрашиваемый период
+                if 0 <= days_difference < days:
+                    day_index = days_difference
 
                     # Add stats to the appropriate day
                     for key, value in record["stats"].items():
@@ -370,4 +379,5 @@ class StatsManager:
             trend_data["keys_collected"].append(day["stats"]["keys_collected"])
             trend_data["keys_per_victory"].append(round(day.get("keys_per_victory", 0), 1))
 
+        self.logger.debug(f"Тренд данные: даты={trend_data['dates']}, ключи={trend_data['keys_collected']}")
         return trend_data

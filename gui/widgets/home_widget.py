@@ -210,8 +210,12 @@ class HomeWidget(QWidget):
         if self.bot_engine.start():
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
+            # Инициализируем время запуска
             self.start_time = time.time()
+            # Сразу обновляем отображение
             self.update_runtime()
+            return True
+        return False
 
     def stop_bot(self):
         """Остановка бота."""
@@ -303,11 +307,25 @@ class HomeWidget(QWidget):
     def update_runtime(self):
         """Обновляет отображение времени работы бота."""
         if self.start_time:
-            elapsed = int(time.time() - self.start_time)
-            hours = elapsed // 3600
-            minutes = (elapsed % 3600) // 60
-            seconds = elapsed % 60
-            self.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+            try:
+                elapsed = int(time.time() - self.start_time)
+                hours = elapsed // 3600
+                minutes = (elapsed % 3600) // 60
+                seconds = elapsed % 60
+                self.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
+                # Обновляем ключей в час при наличии прошедшего времени
+                if elapsed > 0:
+                    keys_collected = self.bot_engine.stats.get("keys_collected", 0)
+                    elapsed_hours = elapsed / 3600.0
+                    keys_per_hour = keys_collected / elapsed_hours if elapsed_hours > 0 else 0
+                    self.keys_per_hour_label.setText(f"{keys_per_hour:.1f}")
+            except Exception as e:
+                print(f"Ошибка при обновлении времени: {e}")
+        else:
+            # Если бот не запущен, показываем нули
+            self.runtime_label.setText("00:00:00")
+            self.keys_per_hour_label.setText("0")
 
     def set_target_keys(self, target):
         """
