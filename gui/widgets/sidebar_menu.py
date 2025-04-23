@@ -30,6 +30,7 @@ class SidebarMenu(QFrame):
         self.pages = {
             "home": {"icon": "home", "tooltip": "Главная"},
             "stats": {"icon": "stats", "tooltip": "Статистика"},
+            "logs": {"icon": "log", "tooltip": "Журнал логов"},
             "settings": {"icon": "settings", "tooltip": "Настройки"},
             "license": {"icon": "license", "tooltip": "Лицензия"}
         }

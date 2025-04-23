@@ -11,6 +11,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QAction
 from config import config
 from gui.styles import Styles
 from gui.widgets.sidebar_menu import SidebarMenu
+from gui.widgets.log_widget import LogWidget
 
 
 class BotSignals(QObject):
@@ -142,16 +143,19 @@ class MainWindow(QMainWindow):
         from gui.widgets.stats_widget import StatsWidget
         from gui.widgets.settings_widget import SettingsWidget
         from gui.widgets.license_widget import LicenseWidget
+        from gui.widgets.log_widget import LogWidget
 
         # Создаём экземпляры страниц
         self.home_widget = HomeWidget(self.bot_engine, self.signals)
         self.stats_widget = StatsWidget(self.bot_engine)
+        self.log_widget = LogWidget()
         self.settings_widget = SettingsWidget(self.bot_engine)
         self.license_widget = LicenseWidget(self.license_validator)
 
         # Добавляем страницы в стек
         self.stack.addWidget(self.home_widget)
         self.stack.addWidget(self.stats_widget)
+        self.stack.addWidget(self.log_widget)
         self.stack.addWidget(self.settings_widget)
         self.stack.addWidget(self.license_widget)
 
@@ -159,8 +163,9 @@ class MainWindow(QMainWindow):
         self.page_indices = {
             "home": 0,
             "stats": 1,
-            "settings": 2,
-            "license": 3
+            "logs": 2,
+            "settings": 3,
+            "license": 4
         }
 
     def connect_widget_signals(self):
@@ -213,8 +218,9 @@ class MainWindow(QMainWindow):
             level (str): Уровень сообщения
             message (str): Текст сообщения
         """
-        # Передаем сообщение в лог на главной странице
+        # Передаем сообщение в лог на главной странице и в виджет логов
         self.home_widget.append_log(level, message)
+        self.log_widget.append_log(level, message)
 
     def update_stats(self, stats):
         """
