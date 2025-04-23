@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QLineEdit, QComboBox, QScrollArea, QSizePolicy, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon, QColor, QFont
+from PyQt6.QtGui import QIcon, QColor, QFont, QTextCursor
 
 from gui.styles import Styles
 from gui.components.log_viewer import LogViewer
@@ -17,6 +17,9 @@ class LogWidget(QWidget):
 
         # Автоматическое обновление последней активности
         self.auto_scroll = True
+
+        # Буфер сообщений для поиска
+        self.log_messages = []
 
         # Инициализация UI
         self.init_ui()
@@ -66,9 +69,13 @@ class LogWidget(QWidget):
 
         # Содержимое панели
         panel_content = QWidget()
-        panel_content_layout = QHBoxLayout(panel_content)
+        panel_content_layout = QVBoxLayout(panel_content)
         panel_content_layout.setContentsMargins(15, 15, 15, 15)
-        panel_content_layout.setSpacing(15)
+        panel_content_layout.setSpacing(10)
+
+        # Верхняя строка - фильтры и чекбоксы
+        top_controls = QHBoxLayout()
+        top_controls.setSpacing(15)
 
         # Фильтр по уровню логирования
         filter_layout = QHBoxLayout()
@@ -83,51 +90,55 @@ class LogWidget(QWidget):
         self.level_combo.currentTextChanged.connect(self.apply_filter)
         filter_layout.addWidget(self.level_combo)
 
-        # Чекбоксы для фильтрации
+        top_controls.addLayout(filter_layout)
+
+        # Чекбоксы для уровней логирования
         self.info_checkbox = QCheckBox("INFO")
         self.info_checkbox.setChecked(True)
         self.info_checkbox.stateChanged.connect(self.apply_filter)
-        filter_layout.addWidget(self.info_checkbox)
+        top_controls.addWidget(self.info_checkbox)
 
         self.warning_checkbox = QCheckBox("WARNING")
         self.warning_checkbox.setChecked(True)
         self.warning_checkbox.stateChanged.connect(self.apply_filter)
-        filter_layout.addWidget(self.warning_checkbox)
+        top_controls.addWidget(self.warning_checkbox)
 
         self.error_checkbox = QCheckBox("ERROR")
         self.error_checkbox.setChecked(True)
         self.error_checkbox.stateChanged.connect(self.apply_filter)
-        filter_layout.addWidget(self.error_checkbox)
+        top_controls.addWidget(self.error_checkbox)
 
         self.debug_checkbox = QCheckBox("DEBUG")
-        self.debug_checkbox.setChecked(True)
+        self.debug_checkbox.setChecked(False)
         self.debug_checkbox.stateChanged.connect(self.apply_filter)
-        filter_layout.addWidget(self.debug_checkbox)
+        top_controls.addWidget(self.debug_checkbox)
 
-        panel_content_layout.addLayout(filter_layout)
-
-        # Автопрокрутка
+        # Чекбокс автопрокрутки
         self.auto_scroll_checkbox = QCheckBox("Автопрокрутка")
         self.auto_scroll_checkbox.setChecked(self.auto_scroll)
         self.auto_scroll_checkbox.stateChanged.connect(self.toggle_auto_scroll)
-        panel_content_layout.addWidget(self.auto_scroll_checkbox)
+        top_controls.addWidget(self.auto_scroll_checkbox)
 
-        # Поиск
-        search_layout = QHBoxLayout()
-        search_layout.setSpacing(10)
+        # Добавляем растягиватель для равномерного распределения
+        top_controls.addStretch(1)
+
+        panel_content_layout.addLayout(top_controls)
+
+        # Нижняя строка - поисковая строка
+        bottom_controls = QHBoxLayout()
+        bottom_controls.setSpacing(10)
 
         search_label = QLabel("Поиск:")
-        search_layout.addWidget(search_label)
+        bottom_controls.addWidget(search_label)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Введите текст для поиска...")
         self.search_input.textChanged.connect(self.search_logs)
-        search_layout.addWidget(self.search_input)
+        bottom_controls.addWidget(self.search_input)
 
-        panel_content_layout.addLayout(search_layout)
+        panel_content_layout.addLayout(bottom_controls)
 
         control_panel_layout.addWidget(panel_content)
-
         layout.addWidget(control_panel)
 
         # Журнал активности
@@ -143,9 +154,9 @@ class LogWidget(QWidget):
         log_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         log_frame_layout.addWidget(log_header)
 
-        # Компонент просмотра логов
+        # Компонент просмотра логов с увеличенной высотой для лучшего отображения
         self.log_viewer = LogViewer()
-        self.log_viewer.setMinimumHeight(500)  # Увеличенная высота для удобства
+        self.log_viewer.setMinimumHeight(400)
         log_frame_layout.addWidget(self.log_viewer, 1)
 
         # Кнопки действий
@@ -156,15 +167,18 @@ class LogWidget(QWidget):
         # Кнопка очистки журнала
         clear_log_button = QPushButton("Очистить журнал")
         clear_log_button.clicked.connect(self.clear_log)
+        clear_log_button.setFixedWidth(150)
         action_layout.addWidget(clear_log_button)
 
-        # Кнопка экспорта журнала (в перспективе)
+        # Кнопка экспорта журнала
         export_log_button = QPushButton("Экспорт в файл")
         export_log_button.clicked.connect(self.export_log)
+        export_log_button.setFixedWidth(150)
         action_layout.addWidget(export_log_button)
 
         log_frame_layout.addLayout(action_layout)
 
+        # Добавляем журнал в основной лейаут и указываем, что он должен растягиваться
         layout.addWidget(log_frame, 1)  # Растягиваем журнал на все доступное пространство
 
     def append_log(self, level, message):
@@ -175,40 +189,48 @@ class LogWidget(QWidget):
             level (str): Уровень сообщения
             message (str): Текст сообщения
         """
+        # Сохраняем сообщение в буфере
+        self.log_messages.append((level, message))
+
         # Проверяем, проходит ли сообщение через фильтр
+        if self._passes_filter(level):
+            # Если поисковый запрос не пустой, проверяем совпадение
+            search_text = self.search_input.text().strip().lower()
+            if not search_text or search_text in message.lower():
+                self.log_viewer.append_log(level, message)
+
+                # Прокручиваем вниз, если включена автопрокрутка
+                if self.auto_scroll:
+                    self.log_viewer.moveCursor(QTextCursor.MoveOperation.End)
+
+    def _passes_filter(self, level):
+        """Проверяет, проходит ли сообщение через текущий фильтр."""
+        level = level.upper()
+
+        # Проверяем чекбоксы для каждого уровня
+        if level == "INFO" and not self.info_checkbox.isChecked():
+            return False
+        if level == "WARNING" and not self.warning_checkbox.isChecked():
+            return False
+        if level == "ERROR" and not self.error_checkbox.isChecked():
+            return False
+        if level == "DEBUG" and not self.debug_checkbox.isChecked():
+            return False
+
+        # Проверяем фильтр в комбобоксе
         current_filter = self.level_combo.currentText()
+        if current_filter != "Все" and level != current_filter:
+            return False
 
-        if current_filter != "Все" and level.upper() != current_filter:
-            return
-
-        # Проверяем чекбоксы
-        if level.upper() == "INFO" and not self.info_checkbox.isChecked():
-            return
-        if level.upper() == "WARNING" and not self.warning_checkbox.isChecked():
-            return
-        if level.upper() == "ERROR" and not self.error_checkbox.isChecked():
-            return
-        if level.upper() == "DEBUG" and not self.debug_checkbox.isChecked():
-            return
-
-        # Добавляем сообщение
-        self.log_viewer.append_log(level, message)
-
-        # Проверяем, есть ли текст для поиска
-        search_text = self.search_input.text().strip()
-        if search_text and search_text.lower() not in message.lower():
-            # Скрываем сообщение, которое не содержит искомый текст
-            # Примечание: это упрощенная реализация, для полной реализации
-            # потребуется модификация LogViewer для поддержки фильтрации
-            pass
+        return True
 
     def clear_log(self):
         """Очищает журнал."""
         self.log_viewer.clear()
+        self.log_messages = []
 
     def export_log(self):
         """Экспортирует журнал в файл."""
-        # В будущем здесь будет код экспорта журнала
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
         import datetime
 
@@ -241,23 +263,30 @@ class LogWidget(QWidget):
 
     def apply_filter(self):
         """Применяет выбранный фильтр к журналу."""
-        # Здесь должен быть код для фильтрации отображаемых логов
-        # В текущей реализации мы просто перезагружаем логи
-        # При реальной реализации нужно модифицировать LogViewer
-        # для поддержки фильтрации уже отображенных сообщений
+        # Очищаем текущее содержимое лога
+        self.log_viewer.clear()
 
-        # Для теста пока просто выводим сообщение
-        level = self.level_combo.currentText()
-        self.log_viewer.append_log("info", f"Фильтр установлен: {level}")
+        # Заново отображаем все сообщения, учитывая текущие фильтры и поиск
+        search_text = self.search_input.text().strip().lower()
+
+        for level, message in self.log_messages:
+            if self._passes_filter(level):
+                if not search_text or search_text in message.lower():
+                    self.log_viewer.append_log(level, message)
+
+        # Если включена автопрокрутка, прокручиваем в конец
+        if self.auto_scroll:
+            self.log_viewer.moveCursor(QTextCursor.MoveOperation.End)
 
     def search_logs(self):
         """Выполняет поиск по журналу."""
-        # Здесь должен быть код для поиска в журнале
-        # Для полной реализации нужно модифицировать LogViewer
-        search_text = self.search_input.text().strip()
-        if search_text:
-            self.log_viewer.append_log("info", f"Поиск: {search_text}")
+        # Применяем тот же метод, что и для фильтрации
+        self.apply_filter()
 
     def toggle_auto_scroll(self, state):
         """Включает/выключает автопрокрутку."""
         self.auto_scroll = bool(state)
+
+        # Прокручиваем в конец, если автопрокрутка включена
+        if self.auto_scroll:
+            self.log_viewer.moveCursor(QTextCursor.MoveOperation.End)

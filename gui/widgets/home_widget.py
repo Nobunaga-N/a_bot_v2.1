@@ -1,14 +1,13 @@
 import time
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QTextEdit, QGridLayout, QSpacerItem, QSizePolicy
+    QGridLayout, QSpacerItem, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QColor, QFont
 
 from gui.styles import Styles
 from gui.components.stat_card import StatCard
-from gui.components.log_viewer import LogViewer
 from gui.widgets.keys_progress_bar import KeysProgressBar
 
 
@@ -152,41 +151,6 @@ class HomeWidget(QWidget):
 
         layout.addWidget(keys_progress_frame)
 
-        # Журнал активности и показатели производительности в две колонки
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(15)
-
-        # Журнал активности
-        log_frame = QFrame()
-        log_frame.setObjectName("section_box")
-        log_frame_layout = QVBoxLayout(log_frame)
-        log_frame_layout.setContentsMargins(0, 0, 0, 0)
-        log_frame_layout.setSpacing(0)
-
-        # Заголовок журнала
-        log_header = QLabel("Журнал активности")
-        log_header.setObjectName("header")
-        log_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        log_frame_layout.addWidget(log_header)
-
-        # Компонент просмотра логов
-        self.log_viewer = LogViewer()
-        self.log_viewer.setMinimumHeight(300)
-        log_frame_layout.addWidget(self.log_viewer, 1)
-
-        # Кнопка очистки журнала
-        clear_button_layout = QHBoxLayout()
-        clear_button_layout.setContentsMargins(15, 10, 15, 15)
-
-        clear_log_button = QPushButton("Очистить журнал")
-        clear_log_button.clicked.connect(self.clear_log)
-        clear_button_layout.addWidget(clear_log_button)
-
-        log_frame_layout.addLayout(clear_button_layout)
-
-        # Добавляем журнал в нижний лейаут (занимает 2/3 ширины)
-        bottom_layout.addWidget(log_frame, 2)
-
         # Показатели производительности
         metrics_frame = QFrame()
         metrics_frame.setObjectName("section_box")
@@ -235,15 +199,11 @@ class HomeWidget(QWidget):
         self.keys_per_hour_label.setStyleSheet(f"color: {Styles.COLORS['warning']};")
         metrics_content_layout.addWidget(self.keys_per_hour_label, 4, 1)
 
-        # Растягиваем сетку показателей вниз, чтобы было выравнивание с журналом
+        # Растягиваем сетку показателей вниз
         metrics_content_layout.setRowStretch(5, 1)
 
         metrics_layout.addWidget(metrics_content, 1)
-
-        # Добавляем показатели в нижний лейаут (занимает 1/3 ширины)
-        bottom_layout.addWidget(metrics_frame, 1)
-
-        layout.addLayout(bottom_layout, 1)
+        layout.addWidget(metrics_frame, 1)
 
     def start_bot(self):
         """Запуск бота."""
@@ -253,18 +213,12 @@ class HomeWidget(QWidget):
             self.start_time = time.time()
             self.update_runtime()
 
-            # Добавляем запись в журнал
-            self.append_log("info", "Бот запущен")
-
     def stop_bot(self):
         """Остановка бота."""
         if self.bot_engine.stop():
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
             self.start_time = None
-
-            # Добавляем запись в журнал
-            self.append_log("info", "Бот остановлен")
 
             # Обновляем статистику
             self.update_stats(self.bot_engine.stats)
@@ -354,20 +308,6 @@ class HomeWidget(QWidget):
             minutes = (elapsed % 3600) // 60
             seconds = elapsed % 60
             self.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-
-    def append_log(self, level, message):
-        """
-        Добавляет сообщение в журнал.
-
-        Args:
-            level (str): Уровень сообщения
-            message (str): Текст сообщения
-        """
-        self.log_viewer.append_log(level, message)
-
-    def clear_log(self):
-        """Очищает журнал."""
-        self.log_viewer.clear()
 
     def set_target_keys(self, target):
         """

@@ -218,8 +218,7 @@ class MainWindow(QMainWindow):
             level (str): Уровень сообщения
             message (str): Текст сообщения
         """
-        # Передаем сообщение в лог на главной странице и в виджет логов
-        self.home_widget.append_log(level, message)
+        # Передаем сообщение только в отдельный виджет логов
         self.log_widget.append_log(level, message)
 
     def update_stats(self, stats):
