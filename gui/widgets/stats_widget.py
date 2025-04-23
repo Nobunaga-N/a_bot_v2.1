@@ -8,6 +8,7 @@ from PyQt6.QtGui import QFont, QColor
 from gui.styles import Styles
 from gui.components.stat_card import StatCard
 from gui.components.styled_table import StyledTable
+from gui.widgets.chart_widgets import LineChartWidget, BarChartWidget, CombinedChartWidget
 
 
 class StatsWidget(QWidget):
@@ -144,32 +145,17 @@ class StatsWidget(QWidget):
         battles_chart_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         battles_chart_layout.addWidget(battles_chart_header)
 
-        # Место для графика побед и поражений
-        self.battles_chart_placeholder = QLabel("График будет отображен при наличии данных")
-        self.battles_chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.battles_chart_placeholder.setMinimumHeight(200)
-        self.battles_chart_placeholder.setStyleSheet(f"""
-            background-color: {Styles.COLORS['background_medium']};
-            color: {Styles.COLORS['text_secondary']};
-            border-radius: 4px;
-        """)
-        battles_chart_layout.addWidget(self.battles_chart_placeholder, 1)
+        # Создаем виджет графика побед и поражений
+        battles_line_chart = LineChartWidget()
+        self.battles_chart = CombinedChartWidget(battles_line_chart)
 
-        # Легенда для графика
-        chart_legend_layout = QHBoxLayout()
-        chart_legend_layout.setContentsMargins(15, 10, 15, 15)
+        # Добавляем легенду для графика
+        self.battles_chart.set_legend([
+            ("Победы", Styles.COLORS["secondary"]),
+            ("Поражения", Styles.COLORS["accent"])
+        ])
 
-        victory_legend = QLabel("● Победы")
-        victory_legend.setStyleSheet(f"color: {Styles.COLORS['secondary']};")
-        chart_legend_layout.addWidget(victory_legend)
-
-        defeat_legend = QLabel("● Поражения")
-        defeat_legend.setStyleSheet(f"color: {Styles.COLORS['accent']};")
-        chart_legend_layout.addWidget(defeat_legend)
-
-        chart_legend_layout.addStretch()
-
-        battles_chart_layout.addLayout(chart_legend_layout)
+        battles_chart_layout.addWidget(self.battles_chart, 1)
 
         charts_layout.addWidget(battles_chart_frame)
 
@@ -185,28 +171,16 @@ class StatsWidget(QWidget):
         keys_chart_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         keys_chart_layout.addWidget(keys_chart_header)
 
-        # Место для графика ключей
-        self.keys_chart_placeholder = QLabel("График будет отображен при наличии данных")
-        self.keys_chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.keys_chart_placeholder.setMinimumHeight(200)
-        self.keys_chart_placeholder.setStyleSheet(f"""
-            background-color: {Styles.COLORS['background_medium']};
-            color: {Styles.COLORS['text_secondary']};
-            border-radius: 4px;
-        """)
-        keys_chart_layout.addWidget(self.keys_chart_placeholder, 1)
+        # Создаем виджет графика ключей
+        keys_bar_chart = BarChartWidget()
+        self.keys_chart = CombinedChartWidget(keys_bar_chart)
 
-        # Легенда для графика ключей
-        keys_legend_layout = QHBoxLayout()
-        keys_legend_layout.setContentsMargins(15, 10, 15, 15)
+        # Добавляем легенду для графика
+        self.keys_chart.set_legend([
+            ("Собрано ключей", Styles.COLORS["warning"])
+        ])
 
-        keys_legend = QLabel("● Собрано ключей")
-        keys_legend.setStyleSheet(f"color: {Styles.COLORS['warning']};")
-        keys_legend_layout.addWidget(keys_legend)
-
-        keys_legend_layout.addStretch()
-
-        keys_chart_layout.addLayout(keys_legend_layout)
+        keys_chart_layout.addWidget(self.keys_chart, 1)
 
         charts_layout.addWidget(keys_chart_frame)
 
@@ -302,22 +276,26 @@ class StatsWidget(QWidget):
             if not trend_data or len(trend_data.get("dates", [])) <= 1:
                 return
 
-            # Обновляем графики
-            # В реальной реализации здесь должен быть код для создания графиков
-            # Для сейчас просто обновим текст в заполнителях
+            # Обновляем график побед и поражений
+            battles_chart = self.battles_chart.chart_widget
+            battles_chart.set_data(
+                trend_data["dates"],
+                [trend_data["victories"], trend_data["defeats"]],
+                ["Победы", "Поражения"]
+            )
 
-            battles_text = "График побед и поражений:\n"
-            for i, date in enumerate(trend_data["dates"]):
-                battles_text += f"{date}: Победы: {trend_data['victories'][i]}, Поражения: {trend_data['defeats'][i]}\n"
-            self.battles_chart_placeholder.setText(battles_text)
-
-            keys_text = "График собранных ключей:\n"
-            for i, date in enumerate(trend_data["dates"]):
-                keys_text += f"{date}: Ключей: {trend_data['keys_collected'][i]}\n"
-            self.keys_chart_placeholder.setText(keys_text)
+            # Обновляем график собранных ключей
+            keys_chart = self.keys_chart.chart_widget
+            keys_chart.set_data(
+                trend_data["dates"],
+                trend_data["keys_collected"],
+                Styles.COLORS["warning"]
+            )
 
         except Exception as e:
             print(f"Ошибка при обновлении графиков: {e}")
+            import traceback
+            print(traceback.format_exc())
 
     def update_daily_stats_table(self):
         """Обновляет таблицу ежедневной статистики."""
@@ -359,5 +337,10 @@ class StatsWidget(QWidget):
                 # Потери связи
                 self.daily_stats_table.setItem(row, 7, QTableWidgetItem(str(day["stats"]["connection_losses"])))
 
+            # Настраиваем цвета ячеек в таблице
+            self.daily_stats_table.customize_cell_colors()
+
         except Exception as e:
             print(f"Ошибка при обновлении таблицы ежедневной статистики: {e}")
+            import traceback
+            print(traceback.format_exc())

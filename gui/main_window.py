@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """Инициализация компонентов интерфейса."""
         self.setWindowTitle("Age of Magic Бот v2.0")
-        self.setMinimumSize(1000, 800)
+        self.setMinimumSize(1200, 830)
 
         # Центральный виджет
         central_widget = QWidget()
