@@ -79,6 +79,10 @@ class SidebarMenu(QFrame):
             layout.addWidget(button)
             self.buttons[page_id] = button
 
+            # Устанавливаем позицию иконки по центру
+            button.setIconSize(QSize(24, 24))
+            button.setProperty("iconPosition", "center")
+
         # Отметить активную страницу и инициализировать иконки
         self.buttons[self.active_page].setChecked(True)
 
@@ -108,12 +112,29 @@ class SidebarMenu(QFrame):
             QPushButton: Созданная кнопка
         """
         from gui.components.svg_helper import get_menu_icon
+        from PyQt6.QtCore import QSize
 
         button = QPushButton()
         button.setObjectName("sidebar_button")
         button.setToolTip(tooltip)
         button.setCheckable(True)
         button.setFixedHeight(60)
+
+        # Установка свойств иконки
+        button.setIconSize(QSize(24, 24))
+
+        # Дополнительные стили для центрирования
+        button.setStyleSheet("""
+            QPushButton {
+                text-align: center;
+            }
+            QPushButton::icon {
+                position: absolute;
+                /* Центрируем иконку */
+                left: 50%;
+                margin-left: -12px; /* половина размера иконки */
+            }
+        """)
 
         # Загрузить иконку
         try:
@@ -130,8 +151,6 @@ class SidebarMenu(QFrame):
         except Exception as e:
             print(f"Ошибка загрузки иконки {icon_name}: {e}")
             button.setText(tooltip[0].upper())
-
-        button.setIconSize(QSize(24, 24))
 
         # Подключение события
         button.clicked.connect(lambda: self.change_page(page_id))

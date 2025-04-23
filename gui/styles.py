@@ -347,8 +347,8 @@ class Styles:
                 color: {cls.COLORS["text_secondary"]};
                 border: none;
                 border-radius: 0;
-                text-align: left;
-                padding: 10px 15px;
+                text-align: center;
+                padding: 10px 0px;
                 font-size: {cls.FONTS["size_normal"]}pt;
             }}
 
@@ -361,7 +361,6 @@ class Styles:
                 background-color: {cls.COLORS["sidebar_active"]};
                 color: {cls.COLORS["primary"]};
                 border-left: 3px solid {cls.COLORS["primary"]};
-                padding-left: 12px;
             }}
 
             /* Стили для карточек статистики */

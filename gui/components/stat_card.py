@@ -31,9 +31,15 @@ class StatCard(QFrame):
                 border-left: 4px solid {color};
                 border-radius: 8px;
                 padding: 15px;
-                min-height: 100px;
             }}
         """)
+
+        # Устанавливаем фиксированную высоту
+        self.setFixedHeight(120)
+
+        # Настраиваем политику размера
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         # Создание лейаута
         layout = QVBoxLayout(self)
@@ -60,9 +66,6 @@ class StatCard(QFrame):
             background-color: transparent;
         """)
         layout.addWidget(self.value_label)
-
-        # Добавляем автоматическое расширение снизу
-        layout.addStretch()
 
     def set_value(self, value):
         """

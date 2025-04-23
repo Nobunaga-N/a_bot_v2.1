@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame,
-    QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea
+    QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
@@ -121,7 +121,12 @@ class StatsWidget(QWidget):
         )
         stats_layout.addWidget(self.total_time_card)
 
-        scroll_layout.addLayout(stats_layout)
+        # Устанавливаем фиксированную высоту для контейнера карточек
+        stats_container = QWidget()
+        stats_container.setLayout(stats_layout)
+        stats_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        scroll_layout.addWidget(stats_container)
 
         # Графики трендов (2 секции в ряд)
         charts_layout = QHBoxLayout()

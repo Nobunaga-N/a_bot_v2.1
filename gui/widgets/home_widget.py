@@ -122,7 +122,12 @@ class HomeWidget(QWidget):
         )
         stats_layout.addWidget(self.keys_card)
 
-        layout.addLayout(stats_layout)
+        # Устанавливаем фиксированную высоту для контейнера карточек
+        stats_container = QWidget()
+        stats_container.setLayout(stats_layout)
+        stats_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        layout.addWidget(stats_container)
 
         # Журнал активности и показатели производительности в две колонки
         bottom_layout = QHBoxLayout()
