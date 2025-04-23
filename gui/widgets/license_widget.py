@@ -1,12 +1,21 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QLineEdit, QMessageBox, QApplication, QProgressBar, QGridLayout
+    QLineEdit, QMessageBox, QApplication, QProgressBar, QGridLayout,
+    QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QFont, QPixmap
 import datetime
 
 from gui.styles import Styles
+
+
+class ScrollFriendlyLineEdit(QLineEdit):
+    """Класс QLineEdit, который игнорирует события прокрутки колеса мыши."""
+
+    def wheelEvent(self, event):
+        # Игнорируем событие прокрутки, чтобы его обработал родительский скролл
+        event.ignore()
 
 
 class LicenseInfoCard(QFrame):
@@ -81,6 +90,7 @@ class LicenseInfoCard(QFrame):
                 border-radius: 4px;
                 text-align: center;
                 color: {Styles.COLORS['text_primary']};
+                min-height: 25px;
             }}
 
             QProgressBar::chunk {{
@@ -96,6 +106,7 @@ class LicenseInfoCard(QFrame):
         details_grid = QGridLayout()
         details_grid.setColumnStretch(1, 1)
         details_grid.setColumnStretch(3, 1)
+        details_grid.setVerticalSpacing(15)  # Увеличиваем вертикальное расстояние
 
         # Строка 1: Статус и дата истечения
         details_grid.addWidget(QLabel("Статус:"), 0, 0)
@@ -254,11 +265,16 @@ class LicenseActivationCard(QFrame):
         key_label = QLabel("Лицензионный ключ:")
         key_layout.addWidget(key_label)
 
-        self.license_key_input = QLineEdit()
+        self.license_key_input = ScrollFriendlyLineEdit()
         self.license_key_input.setPlaceholderText("Введите лицензионный ключ")
+        self.license_key_input.setMinimumHeight(35)  # Увеличиваем высоту поля
         self.license_key_input.setStyleSheet(f"""
             padding: 10px;
             font-family: monospace;
+            background-color: {Styles.COLORS['background_input']};
+            color: {Styles.COLORS['text_primary']};
+            border: 1px solid {Styles.COLORS['border']};
+            border-radius: 4px;
         """)
         key_layout.addWidget(self.license_key_input)
 
@@ -270,6 +286,8 @@ class LicenseActivationCard(QFrame):
 
         self.activate_button = QPushButton("Активировать лицензию")
         self.activate_button.setObjectName("success")
+        self.activate_button.setMinimumHeight(35)  # Увеличиваем высоту кнопки
+        self.activate_button.setFixedWidth(200)  # Фиксируем ширину кнопки
         self.activate_button.clicked.connect(self.activate_license)
         button_layout.addWidget(self.activate_button)
 
@@ -352,13 +370,16 @@ class DeviceInfoCard(QFrame):
         fingerprint_label = QLabel("Отпечаток устройства:")
         fingerprint_layout.addWidget(fingerprint_label)
 
-        self.fingerprint_input = QLineEdit()
+        self.fingerprint_input = ScrollFriendlyLineEdit()
         self.fingerprint_input.setReadOnly(True)
+        self.fingerprint_input.setMinimumHeight(35)  # Увеличиваем высоту поля
         self.fingerprint_input.setStyleSheet(f"""
             background-color: {Styles.COLORS['background_input']};
             color: {Styles.COLORS['text_secondary']};
             padding: 10px;
             font-family: monospace;
+            border: 1px solid {Styles.COLORS['border']};
+            border-radius: 4px;
         """)
         fingerprint_layout.addWidget(self.fingerprint_input)
 
@@ -369,6 +390,8 @@ class DeviceInfoCard(QFrame):
         buttons_layout.addStretch()
 
         self.copy_button = QPushButton("Копировать")
+        self.copy_button.setMinimumHeight(35)  # Увеличиваем высоту кнопки
+        self.copy_button.setFixedWidth(150)  # Фиксируем ширину кнопки
         self.copy_button.clicked.connect(self.copy_fingerprint)
         buttons_layout.addWidget(self.copy_button)
 
@@ -415,9 +438,9 @@ class LicenseWidget(QWidget):
     def init_ui(self):
         """Инициализация интерфейса страницы лицензии."""
         # Основной лэйаут
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(20)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(20)
 
         # Заголовок страницы
         title_layout = QVBoxLayout()
@@ -439,29 +462,46 @@ class LicenseWidget(QWidget):
         """)
         title_layout.addWidget(subtitle_label)
 
-        layout.addLayout(title_layout)
+        main_layout.addLayout(title_layout)
+
+        # Создаем область прокрутки для всего содержимого
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # Контейнер для прокручиваемого содержимого
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(20)
 
         # Информация о лицензии
         self.license_info_card = LicenseInfoCard(
             self.license_validator.get_license_info()
         )
-        layout.addWidget(self.license_info_card)
+        scroll_layout.addWidget(self.license_info_card)
 
         # Активация лицензии
         self.activation_card = LicenseActivationCard(
             self.license_validator,
             parent=self
         )
-        layout.addWidget(self.activation_card)
+        scroll_layout.addWidget(self.activation_card)
 
         # Информация об устройстве
         self.device_info_card = DeviceInfoCard(
-            self.license_validator.fingerprint
+            self.license_validator.fingerprint,
+            parent=self
         )
-        layout.addWidget(self.device_info_card)
+        scroll_layout.addWidget(self.device_info_card)
 
         # Добавляем растягивающийся элемент в конце
-        layout.addStretch()
+        scroll_layout.addStretch()
+
+        # Устанавливаем виджет содержимого в область прокрутки
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area, 1)  # Растягиваем по вертикали
 
     def update_license_info(self):
         """Обновляет информацию о лицензии."""
