@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSpacerItem, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QFont
+from PyQt6.QtSvg import QSvgRenderer
 
 
 class SidebarMenu(QFrame):
@@ -27,10 +28,10 @@ class SidebarMenu(QFrame):
 
         # Определение разделов
         self.pages = {
-            "home": {"icon": "home.png", "tooltip": "Главная"},
-            "stats": {"icon": "stats.png", "tooltip": "Статистика"},
-            "settings": {"icon": "settings.png", "tooltip": "Настройки"},
-            "license": {"icon": "license.png", "tooltip": "Лицензия"}
+            "home": {"icon": "home", "tooltip": "Главная"},
+            "stats": {"icon": "stats", "tooltip": "Статистика"},
+            "settings": {"icon": "settings", "tooltip": "Настройки"},
+            "license": {"icon": "license", "tooltip": "Лицензия"}
         }
 
         # Инициализация UI
@@ -78,8 +79,18 @@ class SidebarMenu(QFrame):
             layout.addWidget(button)
             self.buttons[page_id] = button
 
-        # Отметить активную страницу
+        # Отметить активную страницу и инициализировать иконки
         self.buttons[self.active_page].setChecked(True)
+
+        # Инициализируем иконки с учетом активной страницы
+        from gui.components.svg_helper import get_menu_icon
+
+        for page, button in self.buttons.items():
+            is_active = page == self.active_page
+            icon_name = self.pages[page]["icon"]
+            icon = get_menu_icon(icon_name, is_active)
+            if not icon.isNull():
+                button.setIcon(icon)
 
         # Автоматическое расширение в конце
         layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
@@ -90,12 +101,14 @@ class SidebarMenu(QFrame):
 
         Args:
             page_id (str): ID страницы
-            icon_name (str): Имя файла иконки
+            icon_name (str): Имя файла иконки (без расширения)
             tooltip (str): Текст всплывающей подсказки
 
         Returns:
             QPushButton: Созданная кнопка
         """
+        from gui.components.svg_helper import get_menu_icon
+
         button = QPushButton()
         button.setObjectName("sidebar_button")
         button.setToolTip(tooltip)
@@ -104,16 +117,16 @@ class SidebarMenu(QFrame):
 
         # Загрузить иконку
         try:
-            from PyQt6.QtCore import QSize
-            # Добавим проверку на наличие файла иконки
-            import os
-            icon_path = f"resources/icons/{icon_name}"
-            if os.path.exists(icon_path):
-                button.setIcon(QIcon(icon_path))
+            # Пытаемся загрузить иконку
+            icon = get_menu_icon(icon_name)
+
+            if not icon.isNull():
+                button.setIcon(icon)
             else:
-                # Установим текстовый заголовок, если иконка не найдена
+                # Если иконка не найдена, используем первую букву текста
                 first_letter = tooltip[0] if tooltip else page_id[0]
                 button.setText(first_letter.upper())
+
         except Exception as e:
             print(f"Ошибка загрузки иконки {icon_name}: {e}")
             button.setText(tooltip[0].upper())
@@ -137,9 +150,18 @@ class SidebarMenu(QFrame):
             self.buttons[page_id].setChecked(True)
             return
 
-        # Обновляем состояние кнопок
+        # Обновляем состояние кнопок и иконки
+        from gui.components.svg_helper import get_menu_icon
+
         for page, button in self.buttons.items():
-            button.setChecked(page == page_id)
+            is_active = page == page_id
+            button.setChecked(is_active)
+
+            # Обновляем иконку в зависимости от состояния (активна/неактивна)
+            icon_name = self.pages[page]["icon"]
+            icon = get_menu_icon(icon_name, is_active)
+            if not icon.isNull():
+                button.setIcon(icon)
 
         # Обновляем активную страницу
         self.active_page = page_id

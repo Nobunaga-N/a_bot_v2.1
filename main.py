@@ -117,6 +117,23 @@ def create_resource_dirs():
             os.makedirs(dir_path, exist_ok=True)
             logging.info(f"Создан каталог: {dir_path}")
 
+    # Проверка наличия README для иконок
+    icons_readme = "resources/icons/README.md"
+    if not os.path.exists(icons_readme):
+        # Создаем базовый файл README для иконок
+        try:
+            with open(icons_readme, "w", encoding="utf-8") as f:
+                f.write("# SVG-иконки для приложения\n\n")
+                f.write("Поместите в эту папку следующие SVG-иконки:\n")
+                f.write("- home.svg - Иконка главной страницы\n")
+                f.write("- stats.svg - Иконка статистики\n")
+                f.write("- settings.svg - Иконка настроек\n")
+                f.write("- license.svg - Иконка лицензирования\n")
+
+            logging.info(f"Создан файл с инструкциями по иконкам: {icons_readme}")
+        except Exception as e:
+            logging.error(f"Ошибка при создании файла README для иконок: {e}")
+
 
 def main():
     """Основная точка входа в приложение."""
