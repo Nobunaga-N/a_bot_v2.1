@@ -169,7 +169,7 @@ class SettingsWidget(QWidget):
         bot_content_layout.addWidget(keys_label, 4, 0)
 
         self.target_keys_input = self._create_spinbox(
-            100, 10000, config.get("bot", "target_keys", 1000), 100
+            100, 200000, config.get("bot", "target_keys", 1000), 100
         )
         bot_content_layout.addWidget(self.target_keys_input, 4, 1)
 

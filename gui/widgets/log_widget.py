@@ -29,10 +29,14 @@ class LogWidget(QWidget):
         # Основной лэйаут
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(20)
+        layout.setSpacing(15)  # Уменьшаем отступы между элементами
 
         # Заголовок и управление
-        header_layout = QVBoxLayout()
+        header_layout = QHBoxLayout()  # Используем горизонтальный лейаут для экономии места
+
+        # Блок заголовка
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)  # Уменьшаем расстояние между заголовком и подзаголовком
 
         # Заголовок страницы
         title_label = QLabel("Журнал работы")
@@ -42,7 +46,7 @@ class LogWidget(QWidget):
             font-weight: bold;
             color: {Styles.COLORS['text_primary']};
         """)
-        header_layout.addWidget(title_label)
+        title_block.addWidget(title_label)
 
         # Подзаголовок
         subtitle_label = QLabel("Детальный журнал всех действий бота")
@@ -51,13 +55,28 @@ class LogWidget(QWidget):
             font-size: 14px;
             color: {Styles.COLORS['text_secondary']};
         """)
-        header_layout.addWidget(subtitle_label)
+        title_block.addWidget(subtitle_label)
+
+        header_layout.addLayout(title_block)
+        header_layout.addStretch(1)  # Добавляем растяжку для выравнивания
 
         layout.addLayout(header_layout)
+
+        # Создаем область прокрутки для основного содержимого
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)  # Без рамки для лучшего вида
+
+        # Контейнер для содержимого с прокруткой
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(15)
 
         # Панель управления логами
         control_panel = QFrame()
         control_panel.setObjectName("section_box")
+        control_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # Фиксированная высота
         control_panel_layout = QVBoxLayout(control_panel)
         control_panel_layout.setContentsMargins(0, 0, 0, 0)
         control_panel_layout.setSpacing(0)
@@ -70,23 +89,23 @@ class LogWidget(QWidget):
         # Содержимое панели
         panel_content = QWidget()
         panel_content_layout = QVBoxLayout(panel_content)
-        panel_content_layout.setContentsMargins(15, 15, 15, 15)
-        panel_content_layout.setSpacing(10)
+        panel_content_layout.setContentsMargins(15, 10, 15, 10)  # Уменьшаем вертикальные отступы
+        panel_content_layout.setSpacing(8)  # Уменьшаем расстояние между элементами
 
-        # Верхняя строка - фильтры и чекбоксы
+        # Верхняя строка - фильтры и чекбоксы (делаем более компактной)
         top_controls = QHBoxLayout()
-        top_controls.setSpacing(15)
+        top_controls.setSpacing(10)
 
         # Фильтр по уровню логирования
         filter_layout = QHBoxLayout()
-        filter_layout.setSpacing(10)
+        filter_layout.setSpacing(5)
 
         filter_label = QLabel("Фильтр:")
         filter_layout.addWidget(filter_label)
 
         self.level_combo = QComboBox()
         self.level_combo.addItems(["Все", "INFO", "WARNING", "ERROR", "DEBUG"])
-        self.level_combo.setFixedWidth(150)
+        self.level_combo.setFixedWidth(120)  # Немного уменьшаем ширину
         self.level_combo.currentTextChanged.connect(self.apply_filter)
         filter_layout.addWidget(self.level_combo)
 
@@ -119,14 +138,12 @@ class LogWidget(QWidget):
         self.auto_scroll_checkbox.stateChanged.connect(self.toggle_auto_scroll)
         top_controls.addWidget(self.auto_scroll_checkbox)
 
-        # Добавляем растягиватель для равномерного распределения
         top_controls.addStretch(1)
-
         panel_content_layout.addLayout(top_controls)
 
         # Нижняя строка - поисковая строка
         bottom_controls = QHBoxLayout()
-        bottom_controls.setSpacing(10)
+        bottom_controls.setSpacing(5)
 
         search_label = QLabel("Поиск:")
         bottom_controls.addWidget(search_label)
@@ -139,7 +156,7 @@ class LogWidget(QWidget):
         panel_content_layout.addLayout(bottom_controls)
 
         control_panel_layout.addWidget(panel_content)
-        layout.addWidget(control_panel)
+        content_layout.addWidget(control_panel)
 
         # Журнал активности
         log_frame = QFrame()
@@ -148,38 +165,50 @@ class LogWidget(QWidget):
         log_frame_layout.setContentsMargins(0, 0, 0, 0)
         log_frame_layout.setSpacing(0)
 
+        # Заголовок журнала и кнопки (в одной строке для экономии места)
+        log_header_layout = QHBoxLayout()
+        log_header_layout.setContentsMargins(0, 0, 0, 0)
+
         # Заголовок журнала
         log_header = QLabel("Содержимое журнала")
         log_header.setObjectName("header")
-        log_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        log_frame_layout.addWidget(log_header)
+        log_header_layout.addWidget(log_header, 1)  # Растягивается по горизонтали
 
-        # Компонент просмотра логов с увеличенной высотой для лучшего отображения
-        self.log_viewer = LogViewer()
-        self.log_viewer.setMinimumHeight(400)
-        log_frame_layout.addWidget(self.log_viewer, 1)
-
-        # Кнопки действий
+        # Кнопки действий (сразу в шапке)
         action_layout = QHBoxLayout()
-        action_layout.setContentsMargins(15, 10, 15, 15)
-        action_layout.addStretch()
+        action_layout.setContentsMargins(5, 0, 5, 0)
+        action_layout.setSpacing(5)
 
         # Кнопка очистки журнала
-        clear_log_button = QPushButton("Очистить журнал")
+        clear_log_button = QPushButton("Очистить")
         clear_log_button.clicked.connect(self.clear_log)
-        clear_log_button.setFixedWidth(150)
+        clear_log_button.setFixedWidth(100)
         action_layout.addWidget(clear_log_button)
 
         # Кнопка экспорта журнала
-        export_log_button = QPushButton("Экспорт в файл")
+        export_log_button = QPushButton("Экспорт")
         export_log_button.clicked.connect(self.export_log)
-        export_log_button.setFixedWidth(150)
+        export_log_button.setFixedWidth(100)
         action_layout.addWidget(export_log_button)
 
-        log_frame_layout.addLayout(action_layout)
+        log_header_layout.addLayout(action_layout)
+        log_frame_layout.addLayout(log_header_layout)
 
-        # Добавляем журнал в основной лейаут и указываем, что он должен растягиваться
-        layout.addWidget(log_frame, 1)  # Растягиваем журнал на все доступное пространство
+        # Компонент просмотра логов
+        # Устанавливаем политику размера, чтобы LogViewer мог растягиваться как по горизонтали, так и по вертикали
+        self.log_viewer = LogViewer()
+        self.log_viewer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.log_viewer.setMinimumHeight(200)  # Минимальная высота для удобства
+        log_frame_layout.addWidget(self.log_viewer, 1)  # С растяжкой по вертикали
+
+        # Добавляем журнал в лейаут содержимого с возможностью растяжки
+        content_layout.addWidget(log_frame, 1)  # Растягиваем журнал по вертикали
+
+        # Устанавливаем виджет содержимого в область прокрутки
+        scroll_area.setWidget(content_widget)
+
+        # Добавляем область прокрутки в основной лейаут с растяжкой
+        layout.addWidget(scroll_area, 1)  # Растягиваем область прокрутки
 
     def append_log(self, level, message):
         """

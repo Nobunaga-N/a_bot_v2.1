@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame,
-    QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy
+    QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy,
+    QTabWidget
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
@@ -70,6 +71,38 @@ class StatsWidget(QWidget):
         header_layout.addLayout(period_layout)
 
         layout.addLayout(header_layout)
+
+        # Создаем виджет с вкладками
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setDocumentMode(True)  # Более современный вид вкладок
+        self.tab_widget.setStyleSheet(f"""
+            QTabBar::tab {{
+                padding: 8px 16px;
+                font-size: 14px;
+            }}
+        """)
+
+        # Создаем первую вкладку для обзора (графики и основные показатели)
+        self.overview_tab = QWidget()
+        self.setup_overview_tab()
+        self.tab_widget.addTab(self.overview_tab, "Обзор")
+
+        # Создаем вторую вкладку для ежедневной статистики
+        self.daily_stats_tab = QWidget()
+        self.setup_daily_stats_tab()
+        self.tab_widget.addTab(self.daily_stats_tab, "Ежедневная статистика")
+
+        # Добавляем виджет с вкладками в основной лейаут
+        layout.addWidget(self.tab_widget)
+
+        # Инициализация данных
+        self.refresh_statistics()
+
+    def setup_overview_tab(self):
+        """Настройка вкладки с обзором статистики."""
+        overview_layout = QVBoxLayout(self.overview_tab)
+        overview_layout.setContentsMargins(0, 10, 0, 0)
+        overview_layout.setSpacing(20)
 
         # Создаем область прокрутки для содержимого
         scroll_area = QScrollArea()
@@ -156,17 +189,36 @@ class StatsWidget(QWidget):
 
         scroll_layout.addLayout(charts_layout)
 
-        # Таблица ежедневной статистики
+        # Добавляем растяжку внизу для лучшего отображения на разных разрешениях
+        scroll_layout.addStretch(1)
+
+        # Устанавливаем виджет содержимого в область прокрутки
+        scroll_area.setWidget(scroll_content)
+        overview_layout.addWidget(scroll_area)
+
+    def setup_daily_stats_tab(self):
+        """Настройка вкладки с ежедневной статистикой."""
+        daily_stats_layout = QVBoxLayout(self.daily_stats_tab)
+        daily_stats_layout.setContentsMargins(0, 10, 0, 0)
+        daily_stats_layout.setSpacing(15)
+
+        # Описание таблицы
+        description_label = QLabel("Показатели за последние 7 дней с детализацией по дням")
+        description_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
+        daily_stats_layout.addWidget(description_label)
+
+        # Таблица ежедневной статистики в рамке с заголовком
         daily_stats_frame = QFrame()
         daily_stats_frame.setObjectName("section_box")
-        daily_stats_layout = QVBoxLayout(daily_stats_frame)
-        daily_stats_layout.setContentsMargins(0, 0, 0, 0)
-        daily_stats_layout.setSpacing(0)
+        daily_stats_layout_frame = QVBoxLayout(daily_stats_frame)
+        daily_stats_layout_frame.setContentsMargins(0, 0, 0, 0)
+        daily_stats_layout_frame.setSpacing(0)
 
+        # Заголовок таблицы
         daily_stats_header = QLabel("Ежедневная статистика (7 дней)")
         daily_stats_header.setObjectName("header")
         daily_stats_header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        daily_stats_layout.addWidget(daily_stats_header)
+        daily_stats_layout_frame.addWidget(daily_stats_header)
 
         # Таблица статистики
         self.daily_stats_table = StyledTable()
@@ -176,16 +228,41 @@ class StatsWidget(QWidget):
             "% побед", "Ключей", "Ключей/победа", "Потерь связи"
         ])
 
-        daily_stats_layout.addWidget(self.daily_stats_table, 1)
+        # Устанавливаем растяжение для стилизованной таблицы
+        self.daily_stats_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.daily_stats_table.setMinimumHeight(300)  # Минимальная высота для удобства просмотра
 
-        scroll_layout.addWidget(daily_stats_frame)
+        daily_stats_layout_frame.addWidget(self.daily_stats_table, 1)
+        daily_stats_layout.addWidget(daily_stats_frame, 1)
 
-        # Устанавливаем виджет содержимого в область прокрутки
-        scroll_area.setWidget(scroll_content)
-        layout.addWidget(scroll_area)
+        # Легенда для таблицы
+        legend_frame = QFrame()
+        legend_frame.setStyleSheet(f"background-color: {Styles.COLORS['background_light']}; border-radius: 8px;")
+        legend_layout = QHBoxLayout(legend_frame)
 
-        # Инициализация данных
-        self.refresh_statistics()
+        legend_title = QLabel("Цветовые обозначения:")
+        legend_title.setStyleSheet("font-weight: bold;")
+        legend_layout.addWidget(legend_title)
+
+        victory_legend = QLabel("● Победы")
+        victory_legend.setStyleSheet(f"color: {Styles.COLORS['secondary']};")
+        legend_layout.addWidget(victory_legend)
+
+        defeat_legend = QLabel("● Поражения")
+        defeat_legend.setStyleSheet(f"color: {Styles.COLORS['accent']};")
+        legend_layout.addWidget(defeat_legend)
+
+        key_legend = QLabel("● Ключи")
+        key_legend.setStyleSheet(f"color: {Styles.COLORS['warning']};")
+        legend_layout.addWidget(key_legend)
+
+        connection_legend = QLabel("● Потери связи")
+        connection_legend.setStyleSheet(f"color: {Styles.COLORS['accent']};")
+        legend_layout.addWidget(connection_legend)
+
+        legend_layout.addStretch()
+
+        daily_stats_layout.addWidget(legend_frame)
 
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
