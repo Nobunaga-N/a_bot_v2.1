@@ -211,10 +211,11 @@ class StatsManager:
             Dictionary with aggregated statistics for the period
         """
         now = datetime.datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Define cutoff date based on period
         if period == "day":
-            cutoff = now - datetime.timedelta(days=1)
+            cutoff = today_start  # Начало текущего дня
         elif period == "week":
             cutoff = now - datetime.timedelta(weeks=1)
         elif period == "month":
@@ -250,12 +251,15 @@ class StatsManager:
                     if key in aggregated["stats"]:
                         aggregated["stats"][key] += value
 
-        # Add current session if applicable
+        # Add current session if applicable, только для текущего дня учитываем текущую сессию
         current_duration = (now - self.session_start).total_seconds() / 3600
-        aggregated["total_duration_hours"] += current_duration
 
-        for key, value in self.current_stats.items():
-            aggregated["stats"][key] += value
+        # Добавляем статистику текущей сессии только если просматриваем текущий день, неделю, месяц или все время
+        if (period == "day" and self.session_start >= today_start) or period != "day":
+            aggregated["total_duration_hours"] += current_duration
+
+            for key, value in self.current_stats.items():
+                aggregated["stats"][key] += value
 
         # Calculate derived statistics
         stats = aggregated["stats"]
@@ -328,8 +332,11 @@ class StatsManager:
             except (KeyError, ValueError) as e:
                 self.logger.warning(f"Ошибка обработки записи истории для разбивки по дням: {e}")
 
-        # Add current session stats to today (index 0)
-        if len(daily_stats) > 0:
+        # Проверяем, относится ли текущая сессия к текущему дню
+        session_start_day = self.session_start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Add current session stats to today (index 0) только если сессия начата сегодня
+        if len(daily_stats) > 0 and session_start_day == current_date:
             for key, value in self.current_stats.items():
                 daily_stats[0]["stats"][key] += value
 

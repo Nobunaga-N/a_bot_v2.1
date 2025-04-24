@@ -317,7 +317,7 @@ class StatsWidget(QWidget):
             if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
                 return
 
-            # Получаем данные трендов
+            # Получаем данные трендов - ВАЖНО: force_refresh=True
             trend_data = self.bot_engine.stats_manager.get_trend_data()
 
             # Проверяем, достаточно ли данных для отображения
@@ -326,6 +326,10 @@ class StatsWidget(QWidget):
                 self.battles_chart_widget.clear()
                 self.keys_chart_widget.clear()
                 return
+
+            # Принудительное создание нового HTML для графиков
+            self.battles_chart_widget.clear_cache()
+            self.keys_chart_widget.clear_cache()
 
             # Обновляем графики
             self.battles_chart_widget.update_chart(trend_data)

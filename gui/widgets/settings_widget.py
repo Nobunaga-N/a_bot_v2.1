@@ -196,17 +196,17 @@ class SettingsWidget(QWidget):
         bot_frame.layout().addWidget(bot_content)
         scroll_layout.addWidget(bot_frame)
 
-        # Секция "Настройки интерфейса"
+        # Секция "Настройки интерфейса" - УДАЛЕНА НАСТРОЙКА УРОВНЯ ЛОГИРОВАНИЯ
         ui_frame = self._create_section_frame("Настройки интерфейса")
         ui_content = QWidget()
         ui_content_layout = QGridLayout(ui_content)
         ui_content_layout.setContentsMargins(15, 15, 15, 15)
         ui_content_layout.setVerticalSpacing(15)  # Увеличиваем расстояние между строками
 
-        # Уровень логирования
-        log_level_label = QLabel("Уровень логирования")
-        log_level_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        ui_content_layout.addWidget(log_level_label, 0, 0)
+        # Тема
+        theme_label = QLabel("Тема")
+        theme_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        ui_content_layout.addWidget(theme_label, 0, 0)
 
         # Создаем кастомный класс выпадающего списка, который перенаправляет события колеса мыши
         from PyQt6.QtWidgets import QComboBox
@@ -218,22 +218,11 @@ class SettingsWidget(QWidget):
                 event.ignore()
                 # Событие будет автоматически передано дальше по иерархии виджетов
 
-        self.log_level_combo = ScrollFriendlyComboBox()
-        self.log_level_combo.addItems(["INFO", "DEBUG", "WARNING", "ERROR"])
-        self.log_level_combo.setCurrentText(config.get("ui", "log_level", "INFO"))
-        self.log_level_combo.setMinimumHeight(30)  # Установка минимальной высоты
-        ui_content_layout.addWidget(self.log_level_combo, 0, 1)
-
-        # Тема
-        theme_label = QLabel("Тема")
-        theme_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        ui_content_layout.addWidget(theme_label, 1, 0)
-
-        self.theme_combo = ScrollFriendlyComboBox()  # Используем тот же класс что и выше
+        self.theme_combo = ScrollFriendlyComboBox()
         self.theme_combo.addItems(["Тёмная"])
         self.theme_combo.setCurrentIndex(0)
         self.theme_combo.setMinimumHeight(30)  # Установка минимальной высоты
-        ui_content_layout.addWidget(self.theme_combo, 1, 1)
+        ui_content_layout.addWidget(self.theme_combo, 0, 1)
 
         ui_frame.layout().addWidget(ui_content)
         scroll_layout.addWidget(ui_frame)
@@ -342,7 +331,6 @@ class SettingsWidget(QWidget):
         max_refresh = self.max_refresh_input.value()
         check_interval = self.check_interval_input.value()
         debug_mode = self.debug_mode_toggle.isChecked()
-        log_level = self.log_level_combo.currentText()
         target_keys = self.target_keys_input.value()
 
         # Сохраняем в конфигурацию
@@ -351,7 +339,6 @@ class SettingsWidget(QWidget):
         config.set("bot", "check_interval", check_interval)
         config.set("bot", "debug_mode", debug_mode)
         config.set("bot", "target_keys", target_keys)
-        config.set("ui", "log_level", log_level)
 
         # Сохраняем конфигурационный файл
         if config.save():
@@ -366,20 +353,6 @@ class SettingsWidget(QWidget):
 
             # Отправляем сигнал об изменении цели по ключам
             self.target_keys_changed.emit(target_keys)
-
-            # Обновляем уровень логирования, если это возможно
-            try:
-                import logging
-                py_logger = logging.getLogger("BotLogger")
-                log_level_value = getattr(logging, log_level)
-
-                for handler in py_logger.handlers:
-                    handler.setLevel(log_level_value)
-
-                py_logger.setLevel(log_level_value)
-                py_logger.info(f"Уровень логирования изменен на {log_level}")
-            except Exception as e:
-                print(f"Ошибка при обновлении уровня логирования: {e}")
         else:
             QMessageBox.critical(
                 self,

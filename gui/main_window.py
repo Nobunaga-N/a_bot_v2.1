@@ -291,6 +291,10 @@ class MainWindow(QMainWindow):
 
         # Обновляем только если мы на вкладке статистики
         if self.stack.currentIndex() == self.page_indices.get("stats", -1):
+            # Принудительно обновляем графики при каждом вызове
+            # Это гарантирует, что графики обновятся даже без перезагрузки приложения
+            self.stats_widget.update_trend_charts()
+
             # Если бот запущен, проверяем изменение статистики
             if self.bot_engine.running.is_set():
                 current_stats = self.bot_engine.stats

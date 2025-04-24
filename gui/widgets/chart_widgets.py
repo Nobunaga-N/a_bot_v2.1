@@ -129,6 +129,26 @@ class ResponsiveChartWidget(QWidget):
             if hasattr(self, '_py_logger'):
                 self._py_logger.error(f"Ошибка при удалении временного файла: {e}")
 
+    def clear_cache(self):
+        """Очищает кэш и создает новый HTML-шаблон для принудительного обновления графика."""
+        try:
+            # Удаляем старый файл HTML, если он существует
+            if self.html_path and os.path.exists(self.html_path):
+                os.remove(self.html_path)
+                self._py_logger.debug(f"Удален временный файл шаблона: {self.html_path}")
+
+            # Создаем новый шаблон
+            self.create_html_template()
+            self._py_logger.debug("Создан новый HTML-шаблон для графика")
+
+            # Сбрасываем флаг первой загрузки для включения анимации
+            self.first_load = True
+
+            # Сбрасываем сохраненные данные
+            self.last_data = None
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при очистке кэша графика: {e}")
+
 
 class BattlesChartWidget(ResponsiveChartWidget):
     """Виджет для отображения графика побед и поражений (без линии процента побед)."""
