@@ -100,13 +100,27 @@ class BotEngine:
     def stop(self):
         """Stops the bot."""
         if self.running.is_set():
+            # Перед остановкой бота сохраняем собранные в текущей сессии ключи в stats_manager.keys_current
+            if hasattr(self, 'stats_manager') and self.stats_manager:
+                current_keys = self.stats.get("keys_collected", 0)
+                if current_keys > 0 and hasattr(self.stats_manager, 'keys_current'):
+                    self.logger.info(f"Добавляем {current_keys} ключей из текущей сессии к общему прогрессу")
+                    # Сохраняем текущее значение в stats_manager.keys_current
+                    self.stats_manager.keys_current += current_keys
+
+            # Сохраняем статистику ПЕРЕД сбросом self.running, чтобы сохранилась текущая сессия
+            if self.stats_manager:
+                self.logger.info("Сохранение статистики перед остановкой бота")
+                # Сначала сохраняем прогресс ключей (чтобы гарантировать сохранение)
+                if hasattr(self.stats_manager, 'save_keys_progress'):
+                    self.stats_manager.save_keys_progress()
+                # Затем сохраняем общую статистику
+                self.stats_manager.save_stats()
+
+            # Теперь можно остановить бота
             self.running.clear()
             self.state = BotState.IDLE
             self.logger.info("⛔ Бот остановлен")
-
-            # Save stats when stopping the bot
-            if self.stats_manager:
-                self.stats_manager.save_stats()
 
             return True
         return False

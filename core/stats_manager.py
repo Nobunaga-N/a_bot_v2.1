@@ -116,7 +116,8 @@ class StatsManager:
                         # Обновляем существующую запись
                         record["end_time"] = session_end.isoformat()
                         record["duration_seconds"] = (session_end - self.session_start).total_seconds()
-                        record["stats"] = self.current_stats.copy()
+                        record[
+                            "stats"] = self.current_stats.copy()  # Используем copy() чтобы избежать проблем с указателями
                         is_new_session = False
                         break
 
@@ -125,7 +126,7 @@ class StatsManager:
                         "start_time": self.session_start.isoformat(),
                         "end_time": session_end.isoformat(),
                         "duration_seconds": (session_end - self.session_start).total_seconds(),
-                        "stats": self.current_stats.copy()
+                        "stats": self.current_stats.copy()  # Используем copy() чтобы избежать проблем с указателями
                     }
 
                     self.history.append(session_record)
@@ -142,12 +143,22 @@ class StatsManager:
                 json.dump(data, f, indent=4)
 
             # Обновление общего прогресса ключей: добавляем ключи текущей сессии к общему прогрессу
-            if hasattr(self, 'keys_current') and self.current_stats.get("keys_collected", 0) > 0:
-                # Добавляем собранные в текущей сессии ключи к общему прогрессу
-                self.keys_current += self.current_stats["keys_collected"]
-                # Сбрасываем счетчик текущей сессии - это важно!
-                self.current_stats["keys_collected"] = 0
-                # Сохраняем обновленное значение прогресса
+            if hasattr(self, 'keys_current'):
+                # Если в текущей сессии есть собранные ключи, добавляем их к общему прогрессу
+                keys_collected = self.current_stats.get("keys_collected", 0)
+                if keys_collected > 0:
+                    # Сохраняем текущее значение ключей собранных в этой сессии для логирования
+                    self.logger.info(
+                        f"Добавляем {keys_collected} ключей из текущей сессии к общему прогрессу ({self.keys_current})")
+                    # Добавляем собранные в текущей сессии ключи к общему прогрессу
+                    self.keys_current += keys_collected
+                    self.logger.info(f"Новое значение общего прогресса: {self.keys_current}")
+
+                    # ВАЖНО: НЕ сбрасываем счетчик текущей сессии при остановке бота
+                    # Это позволит правильно отображать статистику в интерфейсе
+                    # self.current_stats["keys_collected"] = 0
+
+                # Безусловно сохраняем текущее значение прогресса ключей, даже если в этой сессии не было собрано ключей
                 self.save_keys_progress()
 
             self.logger.info("Статистика успешно сохранена.")
@@ -412,44 +423,124 @@ class StatsManager:
         """Загружает цель и прогресс сбора ключей из файла."""
         progress_file = os.path.join(self.stats_dir, "keys_progress.json")
 
+        self.logger.info(f"Попытка загрузки прогресса ключей из файла: {progress_file}")
+
         if os.path.exists(progress_file):
             try:
                 with open(progress_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                self.keys_target = data.get("target", 1000)
-                self.keys_current = data.get("current", 0)
+                # Получаем значения с проверкой типов и лимитов
+                try:
+                    self.keys_target = int(data.get("target", 1000))
+                    if self.keys_target <= 0:
+                        self.logger.warning(
+                            f"Некорректное значение target: {self.keys_target}, будет установлено значение по умолчанию")
+                        self.keys_target = 1000
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f"Ошибка при конвертации target в int: {e}")
+                    self.keys_target = 1000
+
+                try:
+                    self.keys_current = int(data.get("current", 0))
+                    if self.keys_current < 0:
+                        self.logger.warning(f"Отрицательное значение current: {self.keys_current}, будет установлен 0")
+                        self.keys_current = 0
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f"Ошибка при конвертации current в int: {e}")
+                    self.keys_current = 0
+
                 self.logger.info(f"Загружен прогресс сбора ключей: {self.keys_current}/{self.keys_target}")
 
-                # Эта строка удалена, чтобы отделить общий прогресс от статистики текущей сессии
-                # self.current_stats["keys_collected"] = self.keys_current
+                # Важно: не присваиваем keys_current в current_stats["keys_collected"],
+                # чтобы разделить общий прогресс и статистику текущей сессии
+                # self.current_stats["keys_collected"] = 0
 
                 return True
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Ошибка формата JSON при загрузке прогресса ключей: {e}")
+                # Создаем резервную копию поврежденного файла
+                import shutil
+                backup_file = f"{progress_file}.bak"
+                try:
+                    shutil.copy(progress_file, backup_file)
+                    self.logger.info(f"Создана резервная копия поврежденного файла: {backup_file}")
+                except Exception as backup_e:
+                    self.logger.error(f"Не удалось создать резервную копию файла: {backup_e}")
             except Exception as e:
                 self.logger.error(f"Ошибка при загрузке прогресса ключей: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+        else:
+            self.logger.info(f"Файл прогресса ключей не найден: {progress_file}")
+            # Инициализируем значения по умолчанию
+            self.keys_target = 1000
+            self.keys_current = 0
+            # Сразу сохраняем значения по умолчанию в файл
+            self.save_keys_progress()
 
         return False
 
     def save_keys_progress(self):
         """Сохраняет цель и прогресс сбора ключей в файл."""
+        import os
         progress_file = os.path.join(self.stats_dir, "keys_progress.json")
 
         try:
-            # Используем текущий общий прогресс (self.keys_current),
-            # а не значение из текущей сессии (current_stats["keys_collected"])
+            # Проверка значений перед сохранением
+            if not hasattr(self, 'keys_target') or not isinstance(self.keys_target, int) or self.keys_target <= 0:
+                self.logger.warning(
+                    f"Некорректное значение keys_target ({getattr(self, 'keys_target', 'не задано')}), установлено 1000")
+                self.keys_target = 1000
+
+            if not hasattr(self, 'keys_current') or not isinstance(self.keys_current, int) or self.keys_current < 0:
+                self.logger.warning(
+                    f"Некорректное значение keys_current ({getattr(self, 'keys_current', 'не задано')}), установлено 0")
+                self.keys_current = 0
+
+            # Сохраняем текущие значения для логирования
+            self.logger.info(f"Сохранение прогресса ключей: target={self.keys_target}, current={self.keys_current}")
+
+            # Формируем данные для сохранения
             data = {
                 "target": self.keys_target,
-                "current": self.keys_current,  # Общий прогресс, накопленный за все сессии
+                "current": self.keys_current,
                 "last_updated": datetime.datetime.now().isoformat()
             }
 
-            with open(progress_file, "w", encoding="utf-8") as f:
+            # Создаем директорию, если она не существует
+            if not os.path.exists(self.stats_dir):
+                os.makedirs(self.stats_dir, exist_ok=True)
+                self.logger.info(f"Создана директория для сохранения прогресса: {self.stats_dir}")
+
+            # Сначала сохраняем во временный файл, затем переименовываем
+            # Это предотвращает повреждение файла при сбое во время записи
+            temp_file = f"{progress_file}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
 
-            self.logger.info(f"Сохранен прогресс сбора ключей: {self.keys_current}/{self.keys_target}")
+            # Если временный файл успешно создан, переименовываем его
+            import os
+            if os.path.exists(progress_file):
+                # Создаем резервную копию текущего файла
+                backup_file = f"{progress_file}.bak"
+                try:
+                    import shutil
+                    shutil.copy2(progress_file, backup_file)
+                    self.logger.debug(f"Создана резервная копия файла прогресса: {backup_file}")
+                except Exception as backup_e:
+                    self.logger.warning(f"Не удалось создать резервную копию: {backup_e}")
+
+            # Переименовываем временный файл в целевой
+            import os
+            os.replace(temp_file, progress_file)
+
+            self.logger.info(f"Прогресс сбора ключей успешно сохранен: {self.keys_current}/{self.keys_target}")
             return True
         except Exception as e:
             self.logger.error(f"Ошибка при сохранении прогресса ключей: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
     def reset_keys_progress(self):

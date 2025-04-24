@@ -488,6 +488,9 @@ class MainWindow(QMainWindow):
                         self.bot_engine.stats_manager.keys_current += self.bot_engine.stats["keys_collected"]
                     # Затем сохраняем общий прогресс
                     self.bot_engine.stats_manager.save_stats()
+                    # Явно сохраняем прогресс ключей для гарантии сохранения
+                    if hasattr(self.bot_engine.stats_manager, 'save_keys_progress'):
+                        self.bot_engine.stats_manager.save_keys_progress()
                 event.accept()
             else:
                 event.ignore()
@@ -500,4 +503,7 @@ class MainWindow(QMainWindow):
                     self.bot_engine.stats_manager.keys_current += self.bot_engine.stats["keys_collected"]
                 # Затем сохраняем общий прогресс
                 self.bot_engine.stats_manager.save_stats()
+                # Явно сохраняем прогресс ключей для гарантии сохранения
+                if hasattr(self.bot_engine.stats_manager, 'save_keys_progress'):
+                    self.bot_engine.stats_manager.save_keys_progress()
             event.accept()

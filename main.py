@@ -89,7 +89,7 @@ def init_bot_engine():
     return bot_engine
 
 
-def setup_exception_handler(logger):
+def setup_exception_handler(logger, stats_manager=None):
     """Настройка глобального обработчика исключений для логирования необработанных исключений."""
 
     def handle_exception(exc_type, exc_value, exc_traceback):
@@ -99,6 +99,23 @@ def setup_exception_handler(logger):
             return
 
         logger.error("Необработанное исключение", exc_info=(exc_type, exc_value, exc_traceback))
+
+        # Сохраняем прогресс ключей перед завершением работы приложения
+        # в случае необработанного исключения
+        if stats_manager is not None:
+            if hasattr(stats_manager, 'save_stats'):
+                try:
+                    stats_manager.save_stats()
+                    logger.info("Статистика сохранена после необработанного исключения")
+                except Exception as e:
+                    logger.error(f"Ошибка при сохранении статистики после исключения: {e}")
+
+            if hasattr(stats_manager, 'save_keys_progress'):
+                try:
+                    stats_manager.save_keys_progress()
+                    logger.info("Прогресс ключей сохранен после необработанного исключения")
+                except Exception as e:
+                    logger.error(f"Ошибка при сохранении прогресса ключей после исключения: {e}")
 
     sys.excepthook = handle_exception
 
@@ -139,6 +156,7 @@ def main():
     """Основная точка входа в приложение."""
     # Инициализация логирования
     logger = init_logging()
+    # Пока инициализируем обработчик исключений без stats_manager (он еще не создан)
     setup_exception_handler(logger)
 
     # Логирование запуска приложения
@@ -170,13 +188,31 @@ def main():
     else:
         logger.info("Лицензия действительна. Все функции доступны.")
 
+    # Инициализация и подключение менеджера статистики
+    stats_manager = init_stats_manager()
+
+    # Теперь обновляем обработчик исключений, передавая ему stats_manager
+    setup_exception_handler(logger, stats_manager)
+
     # Инициализация движка бота
     bot_engine = init_bot_engine()
 
-    # Инициализация и подключение менеджера статистики к движку бота
-    stats_manager = init_stats_manager()
+    # Подключение менеджера статистики к движку бота
     bot_engine.stats_manager = stats_manager
-    bot_engine.stats = stats_manager.current_stats
+
+    # ВАЖНОЕ ИЗМЕНЕНИЕ: Создаем копию словаря, а не используем ссылку на него
+    # Это предотвращает смешивание счетчиков
+    bot_engine.stats = {
+        "battles_started": 0,
+        "victories": 0,
+        "defeats": 0,
+        "connection_losses": 0,
+        "errors": 0,
+        "keys_collected": 0,  # Для новой сессии всегда 0
+        "silver_collected": 0  # Новая сессия всегда с 0
+    }
+
+    logger.info("Инициализация статистики новой сессии с нулевыми значениями")
 
     # Создание главного окна
     main_window = MainWindow(bot_engine, license_validator)

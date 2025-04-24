@@ -12,10 +12,39 @@ class KeysProgressBar(QWidget):
     progress_reset = pyqtSignal()
 
     def __init__(self, target=1000, current=0, parent=None):
+        """
+        Инициализирует прогресс-бар с целью и текущим значением.
+
+        Args:
+            target (int): Целевое количество ключей (по умолчанию 1000)
+            current (int): Текущее количество собранных ключей (по умолчанию 0)
+            parent (QWidget): Родительский виджет
+        """
         super().__init__(parent)
 
-        self.target = target
-        self.current = current
+        # Логирование для отладки
+        import logging
+        self.logger = logging.getLogger("BotLogger")
+        self.logger.debug(f"Инициализация KeysProgressBar: target={target}, current={current}")
+
+        # Приведение значений к целым числам для безопасности
+        try:
+            self.target = int(target)
+            if self.target <= 0:
+                self.logger.warning(f"Некорректное значение target={target}, установлено 1000")
+                self.target = 1000
+        except (TypeError, ValueError):
+            self.logger.warning(f"Ошибка преобразования target={target} в int, установлено 1000")
+            self.target = 1000
+
+        try:
+            self.current = int(current)
+            if self.current < 0:
+                self.logger.warning(f"Отрицательное значение current={current}, установлено 0")
+                self.current = 0
+        except (TypeError, ValueError):
+            self.logger.warning(f"Ошибка преобразования current={current} в int, установлено 0")
+            self.current = 0
 
         # Настройка лейаута
         self.layout = QVBoxLayout(self)
@@ -127,14 +156,28 @@ class KeysProgressBar(QWidget):
 
         self.layout.addLayout(stats_layout)
 
+        # Финальный лог об успешной инициализации
+        self.logger.debug(f"KeysProgressBar успешно инициализирован: {self.current}/{self.target} ({percent}%)")
+
     def update_values(self, current, target=None):
         """Обновляет значения прогресса."""
+        # Сохраняем предыдущее значение для логирования
+        previous_current = self.current
+
+        # Обновляем текущее значение
         self.current = current
 
+        # Обновляем цель, если указана
         if target is not None:
             self.target = target
             self.progress_bar.setRange(0, self.target)
             self.target_value.setText(str(self.target))
+
+        # Логируем изменение, если оно существенное
+        if abs(previous_current - self.current) > 0:
+            import logging
+            logger = logging.getLogger("BotLogger")
+            logger.debug(f"Прогресс-бар: изменение с {previous_current} на {self.current}")
 
         # Обновляем отображение
         self.progress_bar.setValue(min(self.current, self.target))  # Ограничиваем значение прогресс-бара целью
