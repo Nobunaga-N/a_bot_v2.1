@@ -161,23 +161,16 @@ class KeysProgressBar(QWidget):
 
     def update_values(self, current, target=None):
         """Обновляет значения прогресса."""
-        # Сохраняем предыдущее значение для логирования
-        previous_current = self.current
+        # Сохраняем предыдущее значение для логирования при существенных изменениях
+        old_current = self.current
 
-        # Обновляем текущее значение
+        # Обновляем значения
         self.current = current
 
-        # Обновляем цель, если указана
         if target is not None:
             self.target = target
             self.progress_bar.setRange(0, self.target)
             self.target_value.setText(str(self.target))
-
-        # Логируем изменение, если оно существенное
-        if abs(previous_current - self.current) > 0:
-            import logging
-            logger = logging.getLogger("BotLogger")
-            logger.debug(f"Прогресс-бар: изменение с {previous_current} на {self.current}")
 
         # Обновляем отображение
         self.progress_bar.setValue(min(self.current, self.target))  # Ограничиваем значение прогресс-бара целью
@@ -190,6 +183,12 @@ class KeysProgressBar(QWidget):
         # Вычисляем процент выполнения (ограничиваем 999%)
         percent = min(int((self.current / self.target) * 100) if self.target > 0 else 0, 999)
         self.percent_value.setText(f"{percent}%")
+
+        # Логируем существенные изменения в прогрессе (более 5 ключей)
+        if abs(old_current - self.current) > 5:
+            import logging
+            logger = logging.getLogger("BotLogger")
+            logger.debug(f"Обновлен прогресс ключей: {old_current} -> {self.current} ({percent}%)")
 
     def reset_progress(self):
         """Сбрасывает прогресс сбора ключей."""

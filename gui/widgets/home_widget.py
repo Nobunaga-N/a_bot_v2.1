@@ -106,20 +106,32 @@ class HomeWidget(QWidget):
 
         # Если лицензия валидна или не требуется проверка, запускаем бота
         if self.bot_engine.start():
-            # Важно: ТОЛЬКО сбрасываем счетчик ключей текущей сессии,
-            # но НЕ сбрасываем общий прогресс в stats_manager.keys_current
+            # ВАЖНОЕ ИЗМЕНЕНИЕ: Сохраняем текущее состояние прогресс-бара перед сбросом счетчика
+            self._py_logger.info("Обновление статистики на основе сохраненных данных")
+
+            # Сохраняем текущее значение общего прогресса для информации
+            if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+                if hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                    current_progress = self.bot_engine.stats_manager.keys_current
+                    self._py_logger.info(f"Восстановление прогресс-бара к значению: {current_progress}")
+
+            # Теперь сбрасываем счетчик текущей сессии
             self.bot_engine.stats["keys_collected"] = 0
             self.bot_engine.stats["silver_collected"] = 0
 
-            # Обновляем отображение с нулевыми значениями
+            # Обновляем отображение с нулевыми значениями для текущей сессии
             self.keys_card.set_value("0")
             self.silver_card.set_value("0K")
 
-            # Продолжаем обычную инициализацию
+            # Обновляем остальные элементы интерфейса
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
             self.start_time = time.time()
             self.update_runtime()
+
+            # Важно: обновляем статистику, чтобы прогресс-бар показывал правильное значение
+            self.update_stats(self.bot_engine.stats)
+
             return True
 
         return False
@@ -211,11 +223,8 @@ class HomeWidget(QWidget):
         )
         stats_layout.addWidget(self.defeats_card)
 
-        # Карточка с ключами
+        # Карточка с ключами - всегда начинается с 0 для текущей сессии
         keys_collected = 0
-        if hasattr(self.bot_engine, 'stats') and self.bot_engine.stats:
-            keys_collected = self.bot_engine.stats.get("keys_collected", 0)
-
         self.keys_card = StatCard(
             "Ключей собрано",
             str(keys_collected),
@@ -239,32 +248,21 @@ class HomeWidget(QWidget):
         keys_progress_layout.setContentsMargins(0, 0, 0, 0)
         keys_progress_layout.setSpacing(0)
 
-        # Создаем виджет прогресса ключей с надежной инициализацией
+        # Создаем виджет прогресса ключей
+        # ВАЖНО: Инициализируем его с общим значением прогресса из stats_manager
         current_keys = 0
         if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
-            # Проверяем, загружен ли прогресс ключей
+            # Используем значение keys_current (общий прогресс) для прогресс-бара
             if hasattr(self.bot_engine.stats_manager, 'keys_current'):
                 current_keys = self.bot_engine.stats_manager.keys_current
-                self._py_logger.info(f"Загружен общий прогресс ключей для прогресс-бара: {current_keys}")
+                self._py_logger.info(f"Восстановление прогресс-бара к значению: {current_keys}")
             else:
-                # Если keys_current не инициализирован, загружаем его
-                if hasattr(self.bot_engine.stats_manager, 'load_keys_progress'):
-                    self.bot_engine.stats_manager.load_keys_progress()
-                    if hasattr(self.bot_engine.stats_manager, 'keys_current'):
-                        current_keys = self.bot_engine.stats_manager.keys_current
-                        self._py_logger.info(f"Перезагружен прогресс ключей: {current_keys}")
-                    else:
-                        self.bot_engine.stats_manager.keys_current = 0
-                        self._py_logger.warning("Не удалось загрузить прогресс ключей, инициализирован в 0")
+                self.bot_engine.stats_manager.keys_current = 0
+                self._py_logger.info("Инициализация keys_current в stats_manager со значением 0")
 
-        # Инициализируем прогресс-бар и логируем его состояние
-        self._py_logger.info(f"Инициализация прогресс-бара: target={self.target_keys}, current={current_keys}")
         self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=current_keys)
         self.keys_progress_bar.progress_reset.connect(self.reset_keys_progress)
         keys_progress_layout.addWidget(self.keys_progress_bar)
-
-        # Дополнительный лог для отладки
-        self._py_logger.info(f"Прогресс-бар успешно инициализирован: {current_keys}/{self.target_keys}")
 
         layout.addWidget(keys_progress_frame)
 
@@ -347,38 +345,21 @@ class HomeWidget(QWidget):
             self._py_logger.warning("Попытка остановить бота с недействительной лицензией")
             # Останавливаем в любом случае, но логируем
 
-        # Сохраняем текущую статистику перед остановкой
-        current_stats = None
-        if hasattr(self.bot_engine, 'stats'):
-            current_stats = self.bot_engine.stats.copy()
-            self._py_logger.info(
-                f"Сохранена текущая статистика перед остановкой: ключей собрано: {current_stats.get('keys_collected', 0)}")
-
-        # Сохраняем текущее значение прогресс-бара
-        current_progress = 0
-        if hasattr(self, 'keys_progress_bar'):
-            current_progress = self.keys_progress_bar.current
-            self._py_logger.info(f"Сохранен текущий прогресс ключей перед остановкой: {current_progress}")
-
         if self.bot_engine.stop():
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
             self.start_time = None
 
-            # Обновляем статистику на основе сохраненных данных, а не текущих
-            if current_stats:
-                self._py_logger.info("Обновление статистики на основе сохраненных данных")
-                self.update_stats(current_stats)
+            # Обновляем статистику, но НЕ сбрасываем прогресс-бар
+            # Это критично, так как прогресс должен сохраняться между сессиями
+            current_progress = 0
+            if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+                if hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                    current_progress = self.bot_engine.stats_manager.keys_current
+                    self._py_logger.info(f"Сохранение общего прогресса ключей: {current_progress}")
 
-                # Восстанавливаем прогресс-бар к предыдущему значению
-                if hasattr(self, 'keys_progress_bar') and current_progress > 0:
-                    self._py_logger.info(f"Восстановление прогресс-бара к значению: {current_progress}")
-                    self.keys_progress_bar.update_values(current_progress)
-            else:
-                # Если по какой-то причине сохранить статистику не удалось,
-                # используем текущую (но она, скорее всего, уже обнулена)
-                self.update_stats(self.bot_engine.stats)
-
+            # Обновляем статистику с учетом сохраненного прогресса
+            self.update_stats(self.bot_engine.stats)
             return True
 
         return False
@@ -436,8 +417,22 @@ class HomeWidget(QWidget):
         self.defeats_card.set_value(str(stats.get("defeats", 0)))
         self.keys_card.set_value(str(stats.get("keys_collected", 0)))
 
-        # Обновляем индикатор прогресса ключей
-        self.keys_progress_bar.update_values(stats.get("keys_collected", 0))
+        # ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем прогресс-бар правильным образом, учитывая общий прогресс
+        # Получаем текущий прогресс из stats_manager плюс ключи текущей сессии
+        if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+            total_progress = 0
+            if hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                # Используем общий прогресс из stats_manager
+                total_progress = self.bot_engine.stats_manager.keys_current
+
+            # Добавляем ключи текущей сессии к общему прогрессу для отображения
+            total_progress_with_session = total_progress + stats.get("keys_collected", 0)
+
+            # Обновляем прогресс-бар общим значением
+            self.keys_progress_bar.update_values(total_progress_with_session)
+        else:
+            # Если stats_manager недоступен, используем только ключи текущей сессии
+            self.keys_progress_bar.update_values(stats.get("keys_collected", 0))
 
         # Обновляем показатели
         self.connection_losses_label.setText(str(stats.get("connection_losses", 0)))

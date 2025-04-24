@@ -423,61 +423,35 @@ class StatsManager:
         """Загружает цель и прогресс сбора ключей из файла."""
         progress_file = os.path.join(self.stats_dir, "keys_progress.json")
 
-        self.logger.info(f"Попытка загрузки прогресса ключей из файла: {progress_file}")
-
         if os.path.exists(progress_file):
             try:
                 with open(progress_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                # Получаем значения с проверкой типов и лимитов
-                try:
-                    self.keys_target = int(data.get("target", 1000))
-                    if self.keys_target <= 0:
-                        self.logger.warning(
-                            f"Некорректное значение target: {self.keys_target}, будет установлено значение по умолчанию")
-                        self.keys_target = 1000
-                except (ValueError, TypeError) as e:
-                    self.logger.error(f"Ошибка при конвертации target в int: {e}")
-                    self.keys_target = 1000
+                old_target = getattr(self, 'keys_target', 1000)
+                old_current = getattr(self, 'keys_current', 0)
 
-                try:
-                    self.keys_current = int(data.get("current", 0))
-                    if self.keys_current < 0:
-                        self.logger.warning(f"Отрицательное значение current: {self.keys_current}, будет установлен 0")
-                        self.keys_current = 0
-                except (ValueError, TypeError) as e:
-                    self.logger.error(f"Ошибка при конвертации current в int: {e}")
-                    self.keys_current = 0
+                self.keys_target = data.get("target", 1000)
+                self.keys_current = data.get("current", 0)
 
-                self.logger.info(f"Загружен прогресс сбора ключей: {self.keys_current}/{self.keys_target}")
+                self.logger.info(f"Загружен прогресс сбора ключей: {self.keys_current}/{self.keys_target} " +
+                                 f"(было: {old_current}/{old_target})")
 
-                # Важно: не присваиваем keys_current в current_stats["keys_collected"],
-                # чтобы разделить общий прогресс и статистику текущей сессии
+                # ВАЖНО: НЕ присваиваем общий прогресс ключей к текущей сессии
+                # Текущая сессия должна начинаться с 0
                 # self.current_stats["keys_collected"] = 0
 
                 return True
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Ошибка формата JSON при загрузке прогресса ключей: {e}")
-                # Создаем резервную копию поврежденного файла
-                import shutil
-                backup_file = f"{progress_file}.bak"
-                try:
-                    shutil.copy(progress_file, backup_file)
-                    self.logger.info(f"Создана резервная копия поврежденного файла: {backup_file}")
-                except Exception as backup_e:
-                    self.logger.error(f"Не удалось создать резервную копию файла: {backup_e}")
             except Exception as e:
                 self.logger.error(f"Ошибка при загрузке прогресса ключей: {e}")
                 import traceback
                 self.logger.error(traceback.format_exc())
-        else:
-            self.logger.info(f"Файл прогресса ключей не найден: {progress_file}")
-            # Инициализируем значения по умолчанию
-            self.keys_target = 1000
-            self.keys_current = 0
-            # Сразу сохраняем значения по умолчанию в файл
-            self.save_keys_progress()
+
+        # Если файл не существует или произошла ошибка, используем значения по умолчанию
+        self.keys_target = 1000
+        self.keys_current = 0
+        self.logger.info(
+            f"Не удалось загрузить прогресс ключей, используются значения по умолчанию: {self.keys_current}/{self.keys_target}")
 
         return False
 

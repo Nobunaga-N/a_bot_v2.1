@@ -289,10 +289,12 @@ class MainWindow(QMainWindow):
         if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
             return
 
+        # Инициализация текущего времени для использования во всем методе
+        current_time = time.time()
+
         # Обновляем только если мы на вкладке статистики
         if self.stack.currentIndex() == self.page_indices.get("stats", -1):
             # Проверяем время последнего обновления графиков
-            current_time = time.time()
             update_interval = 3  # Минимальный интервал между обновлениями графиков (в секундах)
 
             if not hasattr(self, '_last_charts_update') or (
@@ -321,6 +323,33 @@ class MainWindow(QMainWindow):
                     self.stats_widget.update_stats_cards()
                     self.stats_widget.update_daily_stats_table()
                     self._py_logger.debug("Автоматическое обновление статистики выполнено (бот остановлен)")
+
+        # ВАЖНОЕ ДОПОЛНЕНИЕ: Всегда обновляем прогресс-бар на главной странице, чтобы он отображал правильные значения
+        # Это необходимо, чтобы прогресс-бар обновлялся даже когда мы находимся на главной странице
+        if self.stack.currentIndex() == self.page_indices.get("home", -1) and hasattr(self, 'home_widget'):
+            # Обновляем раз в 5 секунд для экономии ресурсов
+            if not hasattr(self, '_last_progress_update') or (
+                    current_time - getattr(self, '_last_progress_update', 0)) > 5:
+                self._last_progress_update = current_time
+
+                # Проверяем, изменились ли данные перед обновлением
+                if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+                    # Получаем текущее значение из прогресс-бара для сравнения
+                    current_display = self.home_widget.keys_progress_bar.current
+
+                    # Вычисляем общий прогресс с учетом текущей сессии
+                    total_progress = 0
+                    if hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                        total_progress = self.bot_engine.stats_manager.keys_current
+
+                    # Добавляем ключи текущей сессии
+                    total_with_session = total_progress + self.bot_engine.stats.get("keys_collected", 0)
+
+                    # Если значения отличаются, обновляем
+                    if current_display != total_with_session:
+                        self.home_widget.update_stats(self.bot_engine.stats)
+                        self._py_logger.debug(
+                            f"Обновлен прогресс ключей: {total_with_session} (общий: {total_progress} + сессия: {self.bot_engine.stats.get('keys_collected', 0)})")
 
     def export_statistics(self):
         """Экспортирует статистику в CSV файл."""
