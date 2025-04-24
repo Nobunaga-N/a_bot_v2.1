@@ -523,10 +523,11 @@ class MainWindow(QMainWindow):
             else:
                 event.ignore()
         else:
-            # Если бот не запущен, проверяем наличие несохраненных данных
-            if hasattr(self.bot_engine, 'stats') and any(val > 0 for val in self.bot_engine.stats.values()):
+            # Если бот не запущен, проверяем наличие несохраненных данных и что они не были уже зарегистрированы
+            if hasattr(self.bot_engine, 'stats') and any(val > 0 for val in self.bot_engine.stats.values()) and \
+                    not getattr(self.bot_engine, 'session_stats_registered', False):
                 try:
-                    # Регистрируем текущую сессию, даже если бот не был запущен через UI
+                    # Регистрируем текущую сессию, только если она еще не была зарегистрирована
                     if self.bot_engine.stats_manager:
                         self.bot_engine.notify_stats_manager_session_ended()
                         self._py_logger.info("Статистика текущей сессии сохранена при закрытии программы")

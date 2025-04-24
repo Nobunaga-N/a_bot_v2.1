@@ -393,8 +393,13 @@ class HomeWidget(QWidget):
             # Получаем информацию о прогрессе из StatsManager
             progress_info = self.bot_engine.stats_manager.get_keys_progress()
 
-            # Суммируем общий прогресс и ключи текущей сессии для отображения
-            total_progress = progress_info["current"] + stats.get("keys_collected", 0)
+            # Проверяем, была ли статистика сессии уже зарегистрирована
+            if getattr(self.bot_engine, 'session_stats_registered', False):
+                # Статистика уже добавлена в общий прогресс, не добавляем снова
+                total_progress = progress_info["current"]
+            else:
+                # Статистика не была добавлена, добавляем ключи текущей сессии для отображения
+                total_progress = progress_info["current"] + stats.get("keys_collected", 0)
 
             # Обновляем прогресс-бар
             self.keys_progress_bar.update_values(total_progress, target=progress_info["target"])

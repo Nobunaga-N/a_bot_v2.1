@@ -67,6 +67,9 @@ class BotEngine:
         # Время начала текущей сессии
         self.session_start = None
 
+        # Флаг, указывающий, были ли статистика текущей сессии передана в stats_manager
+        self.session_stats_registered = False
+
     def create_empty_stats(self):
         """Создает новый словарь статистики с нулевыми значениями."""
         return {
@@ -103,6 +106,9 @@ class BotEngine:
 
             # Сбрасываем статистику текущей сессии
             self.reset_session_stats()
+
+            # Сбрасываем флаг регистрации сессии
+            self.session_stats_registered = False
 
             # Устанавливаем время начала сессии
             self.session_start = time.time()
@@ -152,6 +158,9 @@ class BotEngine:
             session_end,
             duration
         )
+
+        # Устанавливаем флаг, что статистика сессии уже зарегистрирована
+        self.session_stats_registered = True
 
         self.logger.info(f"Информация о сессии передана в StatsManager (длительность: {duration / 60:.1f} мин)")
 
