@@ -505,34 +505,25 @@ class HomeWidget(QWidget):
 
     def reset_keys_progress(self):
         """Сбрасывает прогресс сбора ключей."""
-        # Показываем диалог подтверждения
-        from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self,
-            "Сброс прогресса",
-            "Вы уверены, что хотите сбросить прогресс сбора ключей?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+        # Больше не показываем диалог здесь, так как он уже показан в KeysProgressBar
 
-        if reply == QMessageBox.StandardButton.Yes:
-            # Сбрасываем прогресс, используя StatsManager
-            if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
-                # Сбрасываем прогресс в StatsManager
-                self.bot_engine.stats_manager.reset_keys_progress()
+        # Сбрасываем прогресс, используя StatsManager
+        if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+            # Сбрасываем прогресс в StatsManager
+            self.bot_engine.stats_manager.reset_keys_progress()
 
-                # Обновляем интерфейс
-                progress_info = self.bot_engine.stats_manager.get_keys_progress()
-                self.keys_progress_bar.update_values(
-                    progress_info["current"] + self.bot_engine.stats.get("keys_collected", 0),
-                    target=progress_info["target"]
-                )
+            # Обновляем интерфейс
+            progress_info = self.bot_engine.stats_manager.get_keys_progress()
+            self.keys_progress_bar.update_values(
+                progress_info["current"] + self.bot_engine.stats.get("keys_collected", 0),
+                target=progress_info["target"]
+            )
 
-                self._py_logger.info("Прогресс ключей сброшен через StatsManager")
-            else:
-                # Если StatsManager недоступен, просто обновляем прогресс-бар
-                self.keys_progress_bar.update_values(0, target=self.target_keys)
-                self._py_logger.warning("StatsManager недоступен, сброс выполнен только в UI")
+            self._py_logger.info("Прогресс ключей сброшен через StatsManager")
+        else:
+            # Если StatsManager недоступен, просто обновляем прогресс-бар
+            self.keys_progress_bar.update_values(0, target=self.target_keys)
+            self._py_logger.warning("StatsManager недоступен, сброс выполнен только в UI")
 
     def update_license_status(self):
         """Обновляет элементы интерфейса в зависимости от статуса лицензии."""
