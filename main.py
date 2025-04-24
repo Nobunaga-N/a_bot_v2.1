@@ -60,9 +60,13 @@ def init_stats_manager():
     return stats_manager
 
 
-def init_bot_engine():
-    """Инициализация движка бота."""
+def init_bot_engine(stats_manager):
+    """Инициализация движка бота с правильным подключением компонентов."""
     # Получаем конфигурацию
+    from config import config, resource_path
+    import os
+    import logging
+
     adb_path = resource_path(config.get("adb", "path", "adb.exe" if os.name == "nt" else "adb"))
     template_dir = resource_path("resources/images")
 
@@ -82,9 +86,16 @@ def init_bot_engine():
         logging.info(f"Найдены шаблоны: {', '.join(template_files)}")
 
     # Создаем компоненты
+    from core.adb_controller import AdbController
+    from core.image_matcher import ImageMatcher
+    from core.bot_engine import BotEngine
+
     adb_controller = AdbController(adb_path)
     image_matcher = ImageMatcher(template_dir)
     bot_engine = BotEngine(adb_controller, image_matcher)
+
+    # Устанавливаем менеджер статистики
+    bot_engine.set_stats_manager(stats_manager)
 
     return bot_engine
 
@@ -155,7 +166,14 @@ def create_resource_dirs():
 def main():
     """Основная точка входа в приложение."""
     # Инициализация логирования
-    logger = init_logging()
+    from core.logger import BotLogger
+    logger = BotLogger(
+        log_file=os.path.join(config.get("license", "directory"), "bot_log.txt"),
+        max_bytes=500000,
+        backup_count=3,
+        log_level=logging.INFO
+    )
+
     # Пока инициализируем обработчик исключений без stats_manager (он еще не создан)
     setup_exception_handler(logger)
 
@@ -188,31 +206,14 @@ def main():
     else:
         logger.info("Лицензия действительна. Все функции доступны.")
 
-    # Инициализация и подключение менеджера статистики
+    # Инициализация менеджера статистики (до создания движка бота)
     stats_manager = init_stats_manager()
 
     # Теперь обновляем обработчик исключений, передавая ему stats_manager
     setup_exception_handler(logger, stats_manager)
 
-    # Инициализация движка бота
-    bot_engine = init_bot_engine()
-
-    # Подключение менеджера статистики к движку бота
-    bot_engine.stats_manager = stats_manager
-
-    # ВАЖНОЕ ИЗМЕНЕНИЕ: Создаем копию словаря, а не используем ссылку на него
-    # Это предотвращает смешивание счетчиков
-    bot_engine.stats = {
-        "battles_started": 0,
-        "victories": 0,
-        "defeats": 0,
-        "connection_losses": 0,
-        "errors": 0,
-        "keys_collected": 0,  # Для новой сессии всегда 0
-        "silver_collected": 0  # Новая сессия всегда с 0
-    }
-
-    logger.info("Инициализация статистики новой сессии с нулевыми значениями")
+    # Инициализация движка бота с передачей менеджера статистики
+    bot_engine = init_bot_engine(stats_manager)
 
     # Создание главного окна
     main_window = MainWindow(bot_engine, license_validator)
@@ -220,7 +221,7 @@ def main():
     # Подключаем сигналы логгера к интерфейсу
     logger.signals.new_log.connect(main_window.append_log)
 
-    # Всегда показываем главное окно
+    # Показываем главное окно
     main_window.show()
 
     # Запуск цикла обработки событий приложения

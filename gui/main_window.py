@@ -499,6 +499,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Обработка события закрытия окна."""
         if self.bot_engine.running.is_set():
+            from PyQt6.QtWidgets import QMessageBox
             reply = QMessageBox.question(
                 self,
                 "Подтверждение выхода",
@@ -509,13 +510,11 @@ class MainWindow(QMainWindow):
 
             if reply == QMessageBox.StandardButton.Yes:
                 try:
-                    # ВАЖНО: сначала останавливаем бота, при этом ключи будут добавлены и сохранены
+                    # Останавливаем бота - это автоматически сохранит статистику и прогресс
                     self.bot_engine.stop()
-
-                    # Сохраняем логи об этом решении
                     self._py_logger.info("Бот остановлен при закрытии программы")
-                    self._py_logger.info("Статистика сохранена после остановки бота")
 
+                    # Принимаем событие закрытия
                     event.accept()
                 except Exception as e:
                     self._py_logger.error(f"Ошибка при остановке бота: {e}")
@@ -524,54 +523,14 @@ class MainWindow(QMainWindow):
             else:
                 event.ignore()
         else:
-            # Если бот не запущен, проверяем, остались ли несохраненные ключи
-            if (hasattr(self.bot_engine, 'stats_manager') and
-                    self.bot_engine.stats_manager is not None and
-                    hasattr(self.bot_engine.stats_manager, 'keys_current') and
-                    self.bot_engine.stats.get("keys_collected", 0) > 0):
-
+            # Если бот не запущен, проверяем наличие несохраненных данных
+            if hasattr(self.bot_engine, 'stats') and any(val > 0 for val in self.bot_engine.stats.values()):
                 try:
-                    # Получаем текущие значения для логирования
-                    keys_collected = self.bot_engine.stats.get("keys_collected", 0)
-                    current_progress = self.bot_engine.stats_manager.keys_current
-
-                    # Логируем действие
-                    self._py_logger.info(f"Найдены несохраненные ключи при закрытии: {keys_collected}")
-                    self._py_logger.info(f"Текущий прогресс перед сохранением: {current_progress}")
-
-                    # Добавляем ключи к общему прогрессу
-                    self.bot_engine.stats_manager.keys_current += keys_collected
-
-                    # Логируем новое значение
-                    self._py_logger.info(f"Обновленный прогресс: {self.bot_engine.stats_manager.keys_current}")
-
-                    # Сбрасываем ключи текущей сессии
-                    self.bot_engine.stats["keys_collected"] = 0
-
-                    # Сохраняем прогресс
-                    self.bot_engine.stats_manager.save_keys_progress()
-                    self._py_logger.info("Прогресс ключей сохранен при закрытии программы")
-
-                    # Сохраняем статистику без обновления ключей
-                    self.bot_engine.stats_manager.save_stats_without_keys_update()
-                    self._py_logger.info("Статистика сохранена при закрытии программы")
+                    # Регистрируем текущую сессию, даже если бот не был запущен через UI
+                    if self.bot_engine.stats_manager:
+                        self.bot_engine.notify_stats_manager_session_ended()
+                        self._py_logger.info("Статистика текущей сессии сохранена при закрытии программы")
                 except Exception as e:
                     self._py_logger.error(f"Ошибка при сохранении данных при закрытии: {e}")
-                    # Пытаемся сохранить все-таки
-                    try:
-                        self.bot_engine.stats_manager.save_stats_without_keys_update()
-                        self._py_logger.info("Статистика сохранена после необработанного исключения")
-                        self.bot_engine.stats_manager.save_keys_progress()
-                        self._py_logger.info("Прогресс ключей сохранен после необработанного исключения")
-                    except:
-                        pass
-            else:
-                # Просто сохраняем статистику, если она есть, но без добавления ключей
-                if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager is not None:
-                    try:
-                        self.bot_engine.stats_manager.save_stats_without_keys_update()
-                        self._py_logger.info("Статистика сохранена при закрытии программы")
-                    except Exception as e:
-                        self._py_logger.error(f"Ошибка при сохранении статистики: {e}")
 
             event.accept()

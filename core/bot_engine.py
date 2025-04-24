@@ -3,7 +3,6 @@ import logging
 import threading
 from enum import Enum, auto
 from typing import Dict, Tuple, Optional, List, Callable
-from core.stats_manager import StatsManager
 
 
 class BotState(Enum):
@@ -56,26 +55,38 @@ class BotEngine:
             BotState.ERROR: self._handle_error
         }
 
-        # Bot statistics
-        self.stats = {
+        # Bot statistics - ТОЛЬКО для текущей сессии
+        self.stats = self.create_empty_stats()
+
+        # Ссылка на stats_manager - будет установлена позже
+        self.stats_manager = None
+
+        # Signals for communicating with the UI (will be set in the main application)
+        self.signals = None
+
+        # Время начала текущей сессии
+        self.session_start = None
+
+    def create_empty_stats(self):
+        """Создает новый словарь статистики с нулевыми значениями."""
+        return {
             "battles_started": 0,
             "victories": 0,
             "defeats": 0,
             "connection_losses": 0,
             "errors": 0,
-            "keys_collected": 0,  # Статистика по ключам
-            "silver_collected": 0  # Новая статистика по серебру
+            "keys_collected": 0,
+            "silver_collected": 0
         }
-
-        # Инициализация stats_manager
-        self.stats_manager = None  # Будет установлен позже в main.py
-
-        # Signals for communicating with the UI (will be set in the main application)
-        self.signals = None
 
     def set_signals(self, signals):
         """Sets the signals object for UI communication."""
         self.signals = signals
+
+    def set_stats_manager(self, stats_manager):
+        """Устанавливает менеджер статистики."""
+        self.stats_manager = stats_manager
+        self.logger.info("StatsManager подключен к BotEngine")
 
     def capture_screen(self):
         """Captures the screen and returns the data."""
@@ -90,6 +101,13 @@ class BotEngine:
                     self.signals.error.emit("ADB не подключен. Проверьте настройки эмулятора!")
                 return False
 
+            # Сбрасываем статистику текущей сессии
+            self.reset_session_stats()
+
+            # Устанавливаем время начала сессии
+            self.session_start = time.time()
+
+            # Запускаем бота
             self.running.set()
             self.state = BotState.STARTING
             threading.Thread(target=self._bot_loop, daemon=True).start()
@@ -99,42 +117,46 @@ class BotEngine:
 
     def stop(self):
         """Stops the bot."""
-        if self.running.is_set():
-            self.running.clear()
-            self.state = BotState.IDLE
-            self.logger.info("⛔ Бот остановлен")
+        if not self.running.is_set():
+            return False
 
-            # Добавляем прогресс текущей сессии к общему прогрессу
-            if self.stats_manager:
-                keys_collected = self.stats.get("keys_collected", 0)
-                if keys_collected > 0 and hasattr(self.stats_manager, 'keys_current'):
-                    current_progress = self.stats_manager.keys_current
-                    self.logger.info(
-                        f"Добавляем {keys_collected} ключей из текущей сессии к общему прогрессу ({current_progress})")
+        self.running.clear()
+        self.state = BotState.IDLE
+        self.logger.info("⛔ Бот остановлен")
 
-                    # Обновляем общий прогресс
-                    self.stats_manager.keys_current += keys_collected
-                    self.logger.info(f"Новое значение общего прогресса: {self.stats_manager.keys_current}")
+        # Завершаем сессию и передаем статистику менеджеру
+        if self.stats_manager:
+            self.notify_stats_manager_session_ended()
 
-                    # Сохраняем обновленный прогресс
-                    if hasattr(self.stats_manager, 'save_keys_progress'):
-                        self.stats_manager.save_keys_progress()
-                        self.logger.info(
-                            f"Сохранение прогресса ключей: target={self.stats_manager.keys_target}, current={self.stats_manager.keys_current}")
+        return True
 
-                    # ВАЖНО: НЕ обнуляем ключи текущей сессии, чтобы интерфейс продолжал их отображать
-                    # self.stats["keys_collected"] = 0  <-- Эта строка удалена
+    def reset_session_stats(self):
+        """Сбрасывает статистику текущей сессии."""
+        self.stats = self.create_empty_stats()
+        self.logger.info("Статистика текущей сессии сброшена")
 
-                # Save stats when stopping the bot
-                # ВАЖНО: Используем метод save_stats БЕЗ добавления ключей
-                self.stats_manager.save_stats_without_keys_update()
+    def notify_stats_manager_session_ended(self):
+        """Уведомляет stats_manager о завершении сессии."""
+        if not self.stats_manager:
+            self.logger.warning("StatsManager недоступен для сохранения статистики сессии")
+            return
 
-            return True
-        return False
+        # Вычисляем длительность сессии
+        session_end = time.time()
+        duration = session_end - (self.session_start or session_end)
+
+        # Передаем информацию о сессии в stats_manager
+        self.stats_manager.register_session(
+            self.stats,
+            self.session_start,
+            session_end,
+            duration
+        )
+
+        self.logger.info(f"Информация о сессии передана в StatsManager (длительность: {duration / 60:.1f} мин)")
 
     def _bot_loop(self):
         """Main bot loop that handles state transitions and actions."""
-        round_count = 0
         try:
             while self.running.is_set():
                 # Call the appropriate handler for the current state
@@ -160,8 +182,12 @@ class BotEngine:
             self.logger.error(f"🚨 Ошибка в цикле бота: {e}")
             self.state = BotState.ERROR
             self.stats["errors"] += 1
+
+            # Оповещаем об изменении статистики
             if self.signals:
                 self.signals.error.emit(f"Ошибка бота: {e}")
+                self.signals.stats_updated.emit(self.stats)
+
         finally:
             # Clean up when the bot stops
             self.running.clear()
@@ -237,6 +263,10 @@ class BotEngine:
         self.logger.info("Подтверждение боя...")
         self.adb.tap(*self.click_coords["confirm_battle"])
         self.stats["battles_started"] += 1
+
+        # Оповещаем об изменении статистики
+        if self.signals:
+            self.signals.stats_updated.emit(self.stats)
 
         # Wait for the auto battle button to appear
         _, match_loc = self.image_matcher.wait_for_images(
@@ -326,18 +356,6 @@ class BotEngine:
                 self.stats["keys_collected"] += keys_count
                 self.logger.info(f"🔑 Получено {keys_count} ключей. Всего собрано: {self.stats['keys_collected']}")
 
-                if hasattr(self, 'stats_manager') and self.stats_manager is not None:
-                    # Просто для отладки записываем значение до и после
-                    old_keys_current = getattr(self.stats_manager, 'keys_current', 0)
-
-                    # Обновляем только общий прогресс, но не текущую сессию
-                    # Текущая сессия обновляется выше через self.stats["keys_collected"]
-                    if hasattr(self.stats_manager, 'keys_current'):
-                        # Не добавляем ключи дважды, так как они уже будут добавлены
-                        # при вызове save_stats() или при закрытии приложения
-                        # self.stats_manager.keys_current += keys_count
-                        self.logger.debug(f"Текущий общий прогресс ключей: {self.stats_manager.keys_current}")
-
             # Detect and count silver before clicking to exit
             silver_count = self.image_matcher.detect_silver(screen_data)
             if silver_count > 0:
@@ -345,7 +363,7 @@ class BotEngine:
                 self.logger.info(
                     f"🔶 Получено {silver_count}K серебра. Всего собрано: {self.stats['silver_collected']}K")
 
-            # If signals is set, emit stats_updated to refresh UI
+            # Оповещаем об изменении статистики
             if self.signals:
                 self.signals.stats_updated.emit(self.stats)
 
@@ -353,17 +371,13 @@ class BotEngine:
             self.adb.tap(*self.click_coords["exit_after_win"])
             time.sleep(5)
 
-            # Обновление статистики в реальном времени
-            if self.stats_manager:
-                self.stats_manager.update_stats(self.stats)
-
             return BotState.STARTING
 
         elif self.image_matcher.find_in_screen(screen_data, "defeat.png"):
             self.logger.info("❌ Поражение! Обновляем список соперников и пробуем снова.")
             self.stats["defeats"] += 1
 
-            # НОВЫЙ КОД: Эмитируем сигнал обновления статистики
+            # Оповещаем об изменении статистики
             if self.signals:
                 self.signals.stats_updated.emit(self.stats)
 
@@ -377,15 +391,7 @@ class BotEngine:
             self.adb.tap(*self.click_coords["refresh_opponents"])
             time.sleep(2)
 
-            # Обновление статистики в реальном времени
-            if self.stats_manager:
-                self.stats_manager.update_stats(self.stats)
-
             return BotState.STARTING
-
-        # Обновление статистики в любом случае
-        if self.stats_manager:
-            self.stats_manager.update_stats(self.stats)
 
         return BotState.STARTING
 
@@ -393,6 +399,10 @@ class BotEngine:
         """Handler for CONNECTION_LOST state."""
         self.logger.warning("⚠ Соединение с сервером потеряно! Пытаемся переподключиться...")
         self.stats["connection_losses"] += 1
+
+        # Оповещаем об изменении статистики
+        if self.signals:
+            self.signals.stats_updated.emit(self.stats)
 
         # Wait for the "Связаться с нами" button to appear
         screen_data = self.capture_screen()
