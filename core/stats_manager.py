@@ -49,6 +49,11 @@ class StatsManager:
         # Session start time
         self.session_start = datetime.datetime.now()
 
+        self.keys_target = 1000  # значение по умолчанию
+        self.keys_current = 0  # текущее количество собранных ключей
+        # Пытаемся загрузить цель и прогресс
+        self.load_keys_progress()
+
         # Load previous stats
         self.load_stats()
 
@@ -134,6 +139,9 @@ class StatsManager:
             # Save to file
             with open(self.stats_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
+
+            # Сохраняем также прогресс ключей
+            self.save_keys_progress()
 
             self.logger.info("Статистика успешно сохранена.")
             return True
@@ -388,3 +396,64 @@ class StatsManager:
 
         self.logger.debug(f"Тренд данные: даты={trend_data['dates']}, ключи={trend_data['keys_collected']}")
         return trend_data
+
+    def load_keys_progress(self):
+        """Загружает цель и прогресс сбора ключей из файла."""
+        progress_file = os.path.join(self.stats_dir, "keys_progress.json")
+
+        if os.path.exists(progress_file):
+            try:
+                with open(progress_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                self.keys_target = data.get("target", 1000)
+                self.keys_current = data.get("current", 0)
+                self.logger.info(f"Загружен прогресс сбора ключей: {self.keys_current}/{self.keys_target}")
+
+                # Синхронизируем с текущей статистикой
+                self.current_stats["keys_collected"] = self.keys_current
+
+                return True
+            except Exception as e:
+                self.logger.error(f"Ошибка при загрузке прогресса ключей: {e}")
+
+        return False
+
+    def save_keys_progress(self):
+        """Сохраняет цель и прогресс сбора ключей в файл."""
+        progress_file = os.path.join(self.stats_dir, "keys_progress.json")
+
+        try:
+            # Синхронизируем с текущей статистикой
+            self.keys_current = self.current_stats["keys_collected"]
+
+            data = {
+                "target": self.keys_target,
+                "current": self.keys_current,
+                "last_updated": datetime.datetime.now().isoformat()
+            }
+
+            with open(progress_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+
+            self.logger.info(f"Сохранен прогресс сбора ключей: {self.keys_current}/{self.keys_target}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при сохранении прогресса ключей: {e}")
+            return False
+
+    def reset_keys_progress(self):
+        """Сбрасывает прогресс сбора ключей."""
+        # Сбрасываем только текущий прогресс, оставляя цель неизменной
+        self.keys_current = 0
+        self.current_stats["keys_collected"] = 0
+
+        # Сохраняем обновленные данные
+        self.save_keys_progress()
+        self.logger.info("Прогресс сбора ключей сброшен")
+
+    def update_keys_target(self, target: int):
+        """Обновляет цель по сбору ключей."""
+        self.keys_target = target
+        self.save_keys_progress()
+        self.logger.info(f"Обновлена цель по сбору ключей: {target}")

@@ -118,6 +118,7 @@ class StatsWidget(QWidget):
         # Основные показатели (4 карточки)
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(15)
+        stats_layout.setContentsMargins(0, 0, 0, 0)  # Убираем внутренние отступы
 
         # Карточка с общим количеством боев
         self.total_battles_card = StatCard(
@@ -159,12 +160,14 @@ class StatsWidget(QWidget):
         stats_container = QWidget()
         stats_container.setLayout(stats_layout)
         stats_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        stats_container.setContentsMargins(0, 0, 0, 0)  # Убираем отступы контейнера
 
         scroll_layout.addWidget(stats_container)
 
         # Графики трендов (2 секции в ряд)
         charts_layout = QHBoxLayout()
         charts_layout.setSpacing(15)
+        charts_layout.setContentsMargins(0, 0, 0, 0)  # Убираем внутренние отступы
 
         # Создаем виджеты графиков
         self.battles_chart_widget = BattlesChartWidget()
@@ -289,14 +292,7 @@ class StatsWidget(QWidget):
             stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
 
             # Обновляем карточки с основными показателями
-            total_battles = stats_data["stats"]["victories"] + stats_data["stats"]["defeats"]
-            self.total_battles_card.set_value(str(total_battles))
-
-            win_rate = stats_data.get("win_rate", 0)
-            self.win_rate_card.set_value(f"{win_rate:.1f}%")
-
-            self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
-            self.total_time_card.set_value(f"{stats_data.get('total_duration_hours', 0):.1f} ч")
+            self.update_stats_cards(stats_data)
 
             # Обновляем графики трендов
             self.update_trend_charts()
@@ -310,6 +306,35 @@ class StatsWidget(QWidget):
             import traceback
             logging.error(traceback.format_exc())
 
+    def update_stats_cards(self, stats_data=None):
+        """Обновляет карточки с основными показателями."""
+        if stats_data is None:
+            # Если данные не переданы, пытаемся получить их
+            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                return
+
+            # Получаем выбранный период
+            period_index = self.period_combo.currentIndex()
+            period_mapping = {
+                0: "day",
+                1: "week",
+                2: "month",
+                3: "all"
+            }
+            period = period_mapping.get(period_index, "all")
+
+            stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
+
+        # Обновляем карточки с основными показателями
+        total_battles = stats_data["stats"]["victories"] + stats_data["stats"]["defeats"]
+        self.total_battles_card.set_value(str(total_battles))
+
+        win_rate = stats_data.get("win_rate", 0)
+        self.win_rate_card.set_value(f"{win_rate:.1f}%")
+
+        self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
+        self.total_time_card.set_value(f"{stats_data.get('total_duration_hours', 0):.1f} ч")
+
     def update_trend_charts(self):
         """Обновляет графики трендов с последними данными."""
         try:
@@ -317,7 +342,7 @@ class StatsWidget(QWidget):
             if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
                 return
 
-            # Получаем данные трендов - ВАЖНО: force_refresh=True
+            # Получаем данные трендов
             trend_data = self.bot_engine.stats_manager.get_trend_data()
 
             # Проверяем, достаточно ли данных для отображения
@@ -327,13 +352,12 @@ class StatsWidget(QWidget):
                 self.keys_chart_widget.clear()
                 return
 
-            # Принудительное создание нового HTML для графиков
-            self.battles_chart_widget.clear_cache()
-            self.keys_chart_widget.clear_cache()
-
-            # Обновляем графики
-            self.battles_chart_widget.update_chart(trend_data)
-            self.keys_chart_widget.update_chart(trend_data)
+            # Обновляем графики (без частой перезагрузки кэша)
+            if not hasattr(self, '_last_chart_update') or trend_data != self._last_chart_update:
+                self._last_chart_update = trend_data
+                # Обновляем графики только если данные изменились
+                self.battles_chart_widget.update_chart(trend_data)
+                self.keys_chart_widget.update_chart(trend_data)
 
         except Exception as e:
             import logging

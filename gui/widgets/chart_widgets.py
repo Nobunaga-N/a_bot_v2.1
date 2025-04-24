@@ -106,13 +106,29 @@ class ResponsiveChartWidget(QWidget):
 
     def handle_resize(self):
         """Обработка изменения размера с небольшой задержкой для оптимизации."""
+        # Проверяем, была ли уже инициирована перерисовка
+        if hasattr(self, '_is_currently_updating') and self._is_currently_updating:
+            return
+
         # Если есть данные, перерисовываем график
         if hasattr(self, 'last_data') and self.last_data:
-            self.update_chart(self.last_data)
+            # Устанавливаем флаг, что перерисовка в процессе
+            self._is_currently_updating = True
+
+            # Обновляем график
+            try:
+                self.update_chart(self.last_data)
+            finally:
+                # Сбрасываем флаг после окончания операции
+                self._is_currently_updating = False
 
     def update_chart(self, data):
         """Обновляет график новыми данными."""
-        # Будет реализован в дочерних классах
+        # Пропускаем обновление, если данные не изменились или их нет
+        if not data or (hasattr(self, 'last_data') and data == self.last_data):
+            return
+
+        # Сохраняем данные для возможной перерисовки
         self.last_data = data
 
     def clear(self):

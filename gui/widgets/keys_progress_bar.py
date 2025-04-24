@@ -1,5 +1,5 @@
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QProgressBar
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QProgressBar, QPushButton
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from gui.styles import Styles
@@ -7,6 +7,9 @@ from gui.styles import Styles
 
 class KeysProgressBar(QWidget):
     """Виджет для отображения прогресса сбора ключей."""
+
+    # Сигнал сбрасывания прогресса
+    progress_reset = pyqtSignal()
 
     def __init__(self, target=1000, current=0, parent=None):
         super().__init__(parent)
@@ -19,6 +22,9 @@ class KeysProgressBar(QWidget):
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(5)
 
+        # Заголовок и кнопка сброса в одной строке
+        header_layout = QHBoxLayout()
+
         # Заголовок
         self.title_label = QLabel("Прогресс сбора ключей")
         self.title_label.setStyleSheet(f"""
@@ -26,7 +32,18 @@ class KeysProgressBar(QWidget):
             font-weight: bold;
             font-size: 14px;
         """)
-        self.layout.addWidget(self.title_label)
+        header_layout.addWidget(self.title_label)
+
+        header_layout.addStretch()
+
+        # Кнопка сброса
+        self.reset_button = QPushButton("Очистить")
+        self.reset_button.setObjectName("danger")
+        self.reset_button.setFixedWidth(100)
+        self.reset_button.clicked.connect(self.reset_progress)
+        header_layout.addWidget(self.reset_button)
+
+        self.layout.addLayout(header_layout)
 
         # Описание
         self.description_label = QLabel("Количество собранных ключей от цели")
@@ -123,3 +140,21 @@ class KeysProgressBar(QWidget):
 
         percent = int((self.current / self.target) * 100) if self.target > 0 else 0
         self.percent_value.setText(f"{percent}%")
+
+    def reset_progress(self):
+        """Сбрасывает прогресс сбора ключей."""
+        # Показываем диалог подтверждения
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Сброс прогресса",
+            "Вы уверены, что хотите сбросить прогресс сбора ключей?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Сбрасываем прогресс
+            self.update_values(0)
+            # Отправляем сигнал о сбросе
+            self.progress_reset.emit()

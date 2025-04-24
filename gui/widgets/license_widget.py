@@ -213,9 +213,23 @@ class LicenseInfoCard(QFrame):
             # Если известна дата истечения, вычисляем общую продолжительность лицензии
             now = datetime.datetime.utcnow()
             if status == "valid":
-                elapsed_days = (now - (expiration - datetime.timedelta(days=total_days))).days
+                # Предполагаем, что activation_date это дата активации, которую нужно получить
+                # Если нет точной даты активации, можно оценить ее по дате истечения и days_left
+                total_days = days_left  # Изначально инициализируем как оставшиеся дни
+
+                # Ищем дату активации в лицензионной информации
+                if hasattr(self, 'activation_date') and self.activation_date.text() != "Н/Д":
+                    try:
+                        activation_date = datetime.datetime.strptime(self.activation_date.text(), "%d.%m.%Y")
+                        total_original_days = (expiration - activation_date).days
+                        if total_original_days > 0:
+                            total_days = total_original_days
+                    except:
+                        pass
+
+                # Вычисляем прогресс как оставшиеся дни / общее количество дней
                 self.license_progress.setRange(0, total_days)
-                self.license_progress.setValue(elapsed_days)
+                self.license_progress.setValue(days_left)
                 self.license_progress.setFormat(f"Осталось {days_left} из {total_days} дней (%p%)")
             else:
                 self.license_progress.setRange(0, 100)

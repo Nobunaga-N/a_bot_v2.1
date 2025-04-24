@@ -291,9 +291,15 @@ class MainWindow(QMainWindow):
 
         # Обновляем только если мы на вкладке статистики
         if self.stack.currentIndex() == self.page_indices.get("stats", -1):
-            # Принудительно обновляем графики при каждом вызове
-            # Это гарантирует, что графики обновятся даже без перезагрузки приложения
-            self.stats_widget.update_trend_charts()
+            # Проверяем время последнего обновления графиков
+            current_time = time.time()
+            update_interval = 3  # Минимальный интервал между обновлениями графиков (в секундах)
+
+            if not hasattr(self, '_last_charts_update') or (
+                    current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
+                self._last_charts_update = current_time
+                # Принудительно обновляем графики только с указанным интервалом
+                self.stats_widget.update_trend_charts()
 
             # Если бот запущен, проверяем изменение статистики
             if self.bot_engine.running.is_set():
@@ -302,16 +308,18 @@ class MainWindow(QMainWindow):
 
                 if str(current_hash) != self.last_stats_hash:
                     self.last_stats_hash = str(current_hash)
-                    self.refresh_statistics()
+                    # Обновляем только табличные данные, но не перерисовываем графики
+                    self.stats_widget.update_stats_cards()
+                    self.stats_widget.update_daily_stats_table()
                     self._py_logger.debug("Автоматическое обновление статистики выполнено (бот запущен)")
             else:
                 # Если бот не запущен, обновляем реже
-                import time
-                current_time = time.time()
                 if not hasattr(self, '_last_stats_update') or (
                         current_time - getattr(self, '_last_stats_update', 0)) > 15:
                     self._last_stats_update = current_time
-                    self.refresh_statistics()
+                    # Обновляем только табличные данные
+                    self.stats_widget.update_stats_cards()
+                    self.stats_widget.update_daily_stats_table()
                     self._py_logger.debug("Автоматическое обновление статистики выполнено (бот остановлен)")
 
     def export_statistics(self):

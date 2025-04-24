@@ -406,6 +406,73 @@ class Styles:
                 background-color: {cls.COLORS["primary"]};
                 border: 2px solid {cls.COLORS["primary"]};
             }}
+            
+                        /* Специальные стили для основных кнопок действий */
+            QPushButton#action_button_success {{
+                background-color: rgba(66, 225, 137, 0.15);  /* Полупрозрачный зеленый фон */
+                color: %(secondary)s;
+                border: 2px solid %(secondary)s;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 140px;
+                height: 40px;
+                font-size: 13px;
+            }}
+            
+            QPushButton#action_button_success:hover {{
+                background-color: rgba(66, 225, 137, 0.25);  /* Более яркий при наведении */
+                border-color: %(secondary_light)s;
+            }}
+            
+            QPushButton#action_button_success:pressed {{
+                background-color: rgba(66, 225, 137, 0.35);  /* Еще ярче при нажатии */
+                border-color: %(secondary_dark)s;
+            }}
+            
+            QPushButton#action_button_danger {{
+                background-color: rgba(255, 107, 108, 0.15);  /* Полупрозрачный красный фон */
+                color: %(accent)s;
+                border: 2px solid %(accent)s;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 140px;
+                height: 40px;
+                font-size: 13px;
+            }}
+            
+            QPushButton#action_button_danger:hover {{
+                background-color: rgba(255, 107, 108, 0.25);  /* Более яркий при наведении */
+                border-color: %(accent_light)s;
+            }}
+            
+            QPushButton#action_button_danger:pressed {{
+                background-color: rgba(255, 107, 108, 0.35);  /* Еще ярче при нажатии */
+                border-color: %(accent_dark)s;
+            }}
+            
+            QPushButton#action_button_primary {{
+                background-color: rgba(63, 224, 200, 0.15);  /* Полупрозрачный бирюзовый фон */
+                color: %(primary)s;
+                border: 2px solid %(primary)s;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 140px;
+                height: 40px;
+                font-size: 13px;
+            }}
+            
+            QPushButton#action_button_primary:hover {{
+                background-color: rgba(63, 224, 200, 0.25);  /* Более яркий при наведении */
+                border-color: %(primary_light)s;
+            }}
+            
+            QPushButton#action_button_primary:pressed {{
+                background-color: rgba(63, 224, 200, 0.35);  /* Еще ярче при нажатии */
+                border-color: %(primary_dark)s;
+            }}
         """
 
     @classmethod

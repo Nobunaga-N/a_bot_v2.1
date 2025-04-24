@@ -33,6 +33,26 @@ class HomeWidget(QWidget):
         # Цель по количеству ключей (можно изменить через настройки)
         self.target_keys = self.DEFAULT_TARGET_KEYS
 
+        # Безопасная загрузка целевого значения из конфигурации или stats_manager
+        from config import config
+        try:
+            # Сначала пробуем загрузить из конфигурации
+            self.target_keys = config.get("bot", "target_keys", self.DEFAULT_TARGET_KEYS)
+
+            # Затем, если доступен stats_manager, проверяем наличие атрибута keys_target
+            if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+                if hasattr(self.bot_engine.stats_manager, 'keys_target'):
+                    self.target_keys = self.bot_engine.stats_manager.keys_target
+                else:
+                    # Если атрибута нет, инициализируем его
+                    self.bot_engine.stats_manager.keys_target = self.target_keys
+
+                # Аналогично для keys_current
+                if not hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                    self.bot_engine.stats_manager.keys_current = self.bot_engine.stats.get("keys_collected", 0)
+        except Exception as e:
+            self._py_logger.warning(f"Не удалось загрузить целевое значение ключей: {e}")
+
         # Инициализация UI
         self.init_ui()
 
@@ -116,18 +136,18 @@ class HomeWidget(QWidget):
 
         # Кнопки управления
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(10)
+        control_layout.setSpacing(15)
 
         # Кнопка запуска
         self.start_button = QPushButton("▶ Запустить")
-        self.start_button.setObjectName("success")
+        self.start_button.setObjectName("action_button_success")
         self.start_button.setFixedHeight(40)
         self.start_button.clicked.connect(self.start_bot)
         control_layout.addWidget(self.start_button)
 
         # Кнопка остановки
         self.stop_button = QPushButton("⛔ Остановить")
-        self.stop_button.setObjectName("danger")
+        self.stop_button.setObjectName("action_button_danger")
         self.stop_button.setFixedHeight(40)
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_bot)
@@ -141,6 +161,7 @@ class HomeWidget(QWidget):
         # Карточки со статистикой (4 карточки в ряд)
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(15)
+        stats_layout.setContentsMargins(0, 0, 0, 0)  # Убираем внутренние отступы
 
         # Карточка с количеством боев
         self.battles_card = StatCard(
@@ -182,6 +203,7 @@ class HomeWidget(QWidget):
         stats_container = QWidget()
         stats_container.setLayout(stats_layout)
         stats_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        stats_container.setContentsMargins(0, 0, 0, 0)  # Убираем отступы контейнера
 
         layout.addWidget(stats_container)
 
@@ -192,13 +214,14 @@ class HomeWidget(QWidget):
         keys_progress_layout.setContentsMargins(0, 0, 0, 0)
         keys_progress_layout.setSpacing(0)
 
-        # Заголовок индикатора прогресса
-        keys_progress_header = QLabel("Прогресс сбора ключей")
-        keys_progress_header.setObjectName("header")
-        keys_progress_layout.addWidget(keys_progress_header)
+        # Создаем виджет прогресса ключей
+        # Инициализируем его с текущими значениями прогресса
+        current_keys = 0
+        if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+            current_keys = self.bot_engine.stats_manager.keys_current
 
-        # Виджет прогресса ключей
-        self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=0)
+        self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=current_keys)
+        self.keys_progress_bar.progress_reset.connect(self.reset_keys_progress)
         keys_progress_layout.addWidget(self.keys_progress_bar)
 
         layout.addWidget(keys_progress_frame)
@@ -383,10 +406,42 @@ class HomeWidget(QWidget):
             target (int): Целевое количество ключей
         """
         self.target_keys = target
+
+        # Обновляем цель в менеджере статистики
+        if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+            self.bot_engine.stats_manager.update_keys_target(target)
+
+        # Обновляем отображение прогресса
         self.keys_progress_bar.update_values(
             self.bot_engine.stats.get("keys_collected", 0),
             target=self.target_keys
         )
+
+    def reset_keys_progress(self):
+        """Сбрасывает прогресс сбора ключей."""
+        # Проверяем наличие stats_manager
+        if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+            # Проверяем наличие метода reset_keys_progress
+            if hasattr(self.bot_engine.stats_manager, 'reset_keys_progress'):
+                # Сбрасываем прогресс в менеджере статистики
+                self.bot_engine.stats_manager.reset_keys_progress()
+            else:
+                # Если метода нет, сбрасываем счетчик ключей вручную
+                self.bot_engine.stats_manager.keys_current = 0
+                if hasattr(self.bot_engine.stats_manager, 'save_keys_progress'):
+                    self.bot_engine.stats_manager.save_keys_progress()
+                else:
+                    self.bot_engine.stats_manager.save_stats()  # Используем обычный метод сохранения
+
+            # Обновляем счетчик ключей в статистике бота
+            self.bot_engine.stats["keys_collected"] = 0
+
+            # Обновляем отображение статистики
+            self.update_stats(self.bot_engine.stats)
+        else:
+            # Если stats_manager недоступен, просто обнуляем статистику
+            self.bot_engine.stats["keys_collected"] = 0
+            self.update_stats(self.bot_engine.stats)
 
     def update_license_status(self):
         """Обновляет элементы интерфейса в зависимости от статуса лицензии."""
