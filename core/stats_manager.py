@@ -589,7 +589,8 @@ class StatsManager:
                         # Обновляем существующую запись
                         record["end_time"] = session_end.isoformat()
                         record["duration_seconds"] = (session_end - self.session_start).total_seconds()
-                        record["stats"] = self.current_stats.copy()
+                        record[
+                            "stats"] = self.current_stats.copy()  # Используем copy() чтобы избежать проблем с указателями
                         is_new_session = False
                         break
 
@@ -598,7 +599,7 @@ class StatsManager:
                         "start_time": self.session_start.isoformat(),
                         "end_time": session_end.isoformat(),
                         "duration_seconds": (session_end - self.session_start).total_seconds(),
-                        "stats": self.current_stats.copy()
+                        "stats": self.current_stats.copy()  # Используем copy() чтобы избежать проблем с указателями
                     }
 
                     self.history.append(session_record)
@@ -616,10 +617,11 @@ class StatsManager:
 
             # ОТЛИЧИЕ ОТ ОБЫЧНОГО МЕТОДА:
             # НЕ добавляем ключи текущей сессии к общему прогрессу
-            # Только сохраняем текущее значение keys_current
+            # Только сохраняем текущее значение keys_current без изменений
             if hasattr(self, 'keys_current'):
                 # Сохраняем текущее значение прогресса для логирования
-                self.logger.info(f"Сохранение прогресса ключей (без обновления): {self.keys_current}")
+                self.logger.info(
+                    f"Сохранение прогресса ключей (без обновления): {self.keys_current}/{self.keys_target}")
                 # Сохраняем текущее значение
                 self.save_keys_progress()
 

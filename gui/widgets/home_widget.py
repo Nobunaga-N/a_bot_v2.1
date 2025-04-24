@@ -111,9 +111,9 @@ class HomeWidget(QWidget):
             if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
                 if hasattr(self.bot_engine.stats_manager, 'keys_current'):
                     current_progress = self.bot_engine.stats_manager.keys_current
-                    self._py_logger.info(f"Восстановление прогресс-бара к значению: {current_progress}")
+                    self._py_logger.info(f"Текущий общий прогресс ключей: {current_progress}")
 
-            # Теперь сбрасываем счетчик текущей сессии
+            # При запуске бота ВСЕГДА сбрасываем счетчики текущей сессии
             self.bot_engine.stats["keys_collected"] = 0
             self.bot_engine.stats["silver_collected"] = 0
 
@@ -128,6 +128,7 @@ class HomeWidget(QWidget):
             self.update_runtime()
 
             # Важно: обновляем статистику, чтобы прогресс-бар показывал правильное значение
+            # (общий прогресс + 0 ключей текущей сессии)
             self.update_stats(self.bot_engine.stats)
 
             return True
@@ -393,8 +394,7 @@ class HomeWidget(QWidget):
             stats (dict): Статистика бота
         """
         # Обновляем карточки
-        self.battles_label.setText(
-            str(stats.get("battles_started", 0)))
+        self.battles_label.setText(str(stats.get("battles_started", 0)))
 
         # Форматируем значение серебра для карточки с использованием нового метода
         # Учитываем, что значение уже в тысячах (K)
@@ -415,13 +415,14 @@ class HomeWidget(QWidget):
                 total_progress = self.bot_engine.stats_manager.keys_current
 
             # Добавляем ключи текущей сессии к общему прогрессу для отображения
+            # Важно: это только для отображения, фактическое добавление происходит при остановке бота
             total_progress_with_session = total_progress + stats.get("keys_collected", 0)
 
             # Обновляем прогресс-бар общим значением
-            self.keys_progress_bar.update_values(total_progress_with_session)
+            self.keys_progress_bar.update_values(total_progress_with_session, target=self.target_keys)
         else:
             # Если stats_manager недоступен, используем только ключи текущей сессии
-            self.keys_progress_bar.update_values(stats.get("keys_collected", 0))
+            self.keys_progress_bar.update_values(stats.get("keys_collected", 0), target=self.target_keys)
 
         # Обновляем показатели
         self.connection_losses_label.setText(str(stats.get("connection_losses", 0)))

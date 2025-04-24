@@ -122,8 +122,8 @@ class BotEngine:
                         self.logger.info(
                             f"Сохранение прогресса ключей: target={self.stats_manager.keys_target}, current={self.stats_manager.keys_current}")
 
-                    # ВАЖНО: Обнуляем ключи текущей сессии, чтобы избежать повторного добавления
-                    self.stats["keys_collected"] = 0
+                    # ВАЖНО: НЕ обнуляем ключи текущей сессии, чтобы интерфейс продолжал их отображать
+                    # self.stats["keys_collected"] = 0  <-- Эта строка удалена
 
                 # Save stats when stopping the bot
                 # ВАЖНО: Используем метод save_stats БЕЗ добавления ключей
