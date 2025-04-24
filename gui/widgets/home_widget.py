@@ -95,6 +95,16 @@ class HomeWidget(QWidget):
 
         # Если лицензия валидна или не требуется проверка, запускаем бота
         if self.bot_engine.start():
+            # Важно: сбрасываем статистику при запуске нового сеанса
+            # Это гарантирует, что при запуске считаем именно новый прогресс
+            self.bot_engine.stats["keys_collected"] = 0
+            self.bot_engine.stats["silver_collected"] = 0
+
+            # Обновляем отображение с нулевыми значениями
+            self.keys_card.set_value("0")
+            self.silver_card.set_value("0K")
+
+            # Продолжаем обычную инициализацию
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
             self.start_time = time.time()
@@ -191,9 +201,13 @@ class HomeWidget(QWidget):
         stats_layout.addWidget(self.defeats_card)
 
         # Карточка с ключами
+        keys_collected = 0
+        if hasattr(self.bot_engine, 'stats') and self.bot_engine.stats:
+            keys_collected = self.bot_engine.stats.get("keys_collected", 0)
+
         self.keys_card = StatCard(
             "Ключей собрано",
-            "0",
+            str(keys_collected),
             Styles.COLORS["warning"],
             "key"
         )
@@ -357,11 +371,12 @@ class HomeWidget(QWidget):
         """
         # Обновляем карточки
         self.battles_label.setText(
-            str(stats.get("battles_started", 0)))  # Кол-во боев перенесено в показатели производительности
+            str(stats.get("battles_started", 0)))
 
-        # Форматируем значение серебра для карточки с K на конце
+        # Форматируем значение серебра для карточки с использованием нового метода
+        # Учитываем, что значение уже в тысячах (K)
         silver_value = stats.get("silver_collected", 0)
-        silver_formatted = f"{silver_value:.1f}K" if silver_value > 0 else "0K"
+        silver_formatted = Styles.format_silver(silver_value)
         self.silver_card.set_value(silver_formatted)
 
         self.victories_card.set_value(str(stats.get("victories", 0)))
@@ -386,9 +401,9 @@ class HomeWidget(QWidget):
                 keys_per_victory = stats.get("keys_collected", 0) / victories
                 self.keys_per_victory_label.setText(f"{keys_per_victory:.1f}")
 
-                # Вычисляем количество серебра за победу
+                # Вычисляем количество серебра за победу - тоже уже в K
                 silver_per_victory = stats.get("silver_collected", 0) / victories
-                self.silver_per_victory_label.setText(f"{silver_per_victory:.1f}K")
+                self.silver_per_victory_label.setText(Styles.format_silver(silver_per_victory))
             else:
                 self.keys_per_victory_label.setText("0")
                 self.silver_per_victory_label.setText("0K")
@@ -404,8 +419,9 @@ class HomeWidget(QWidget):
                 keys_per_hour = stats.get("keys_collected", 0) / elapsed_hours
                 self.keys_per_hour_label.setText(f"{keys_per_hour:.1f}")
 
+                # Используем format_silver для серебра в час
                 silver_per_hour = stats.get("silver_collected", 0) / elapsed_hours
-                self.silver_per_hour_label.setText(f"{silver_per_hour:.1f}K")
+                self.silver_per_hour_label.setText(Styles.format_silver(silver_per_hour))
             else:
                 self.keys_per_hour_label.setText("0")
                 self.silver_per_hour_label.setText("0K")

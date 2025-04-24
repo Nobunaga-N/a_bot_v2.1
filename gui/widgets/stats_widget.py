@@ -357,9 +357,9 @@ class StatsWidget(QWidget):
 
         self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
 
-        # Форматируем значение серебра с K на конце
+        # Форматируем значение серебра учитывая, что оно уже в K
         silver_collected = stats_data["stats"].get("silver_collected", 0)
-        silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
+        silver_formatted = Styles.format_silver(silver_collected)
         self.total_silver_card.set_value(silver_formatted)
 
         # Отображаем общее время игры при наличии данных о продолжительности
@@ -436,9 +436,9 @@ class StatsWidget(QWidget):
                 keys_per_victory = day.get("keys_per_victory", 0)
                 self.daily_stats_table.setItem(row, 6, QTableWidgetItem(f"{keys_per_victory:.1f}"))
 
-                # Собрано серебра (с форматированием K)
+                # Собрано серебра - используем специальный метод для серебра
                 silver_collected = day["stats"].get("silver_collected", 0)
-                silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
+                silver_formatted = Styles.format_silver(silver_collected)
                 self.daily_stats_table.setItem(row, 7, QTableWidgetItem(silver_formatted))
 
                 # Потери связи

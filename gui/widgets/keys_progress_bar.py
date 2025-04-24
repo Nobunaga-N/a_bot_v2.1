@@ -50,10 +50,10 @@ class KeysProgressBar(QWidget):
         self.description_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
         self.layout.addWidget(self.description_label)
 
-        # Прогресс-бар
+        # Прогресс-бар с улучшенным стилем
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, self.target)
-        self.progress_bar.setValue(self.current)
+        self.progress_bar.setValue(min(self.current, self.target))  # Защита от перевыполнения
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setFixedHeight(20)
         self.progress_bar.setStyleSheet(f"""
@@ -103,7 +103,9 @@ class KeysProgressBar(QWidget):
         remaining_title.setStyleSheet(f"color: {Styles.COLORS['text_secondary']}; font-size: 12px;")
         remaining_layout.addWidget(remaining_title)
 
-        self.remaining_value = QLabel(str(self.target - self.current))
+        # Осталось (не меньше нуля)
+        remaining = max(0, self.target - self.current)
+        self.remaining_value = QLabel(str(remaining))
         self.remaining_value.setStyleSheet(f"color: {Styles.COLORS['primary']}; font-weight: bold; font-size: 16px;")
         remaining_layout.addWidget(self.remaining_value)
 
@@ -115,7 +117,8 @@ class KeysProgressBar(QWidget):
         percent_title.setStyleSheet(f"color: {Styles.COLORS['text_secondary']}; font-size: 12px;")
         percent_layout.addWidget(percent_title)
 
-        percent = int((self.current / self.target) * 100) if self.target > 0 else 0
+        # Процент (не более 999%)
+        percent = min(int((self.current / self.target) * 100) if self.target > 0 else 0, 999)
         self.percent_value = QLabel(f"{percent}%")
         self.percent_value.setStyleSheet(f"color: {Styles.COLORS['secondary']}; font-weight: bold; font-size: 16px;")
         percent_layout.addWidget(self.percent_value)
@@ -134,11 +137,15 @@ class KeysProgressBar(QWidget):
             self.target_value.setText(str(self.target))
 
         # Обновляем отображение
-        self.progress_bar.setValue(self.current)
+        self.progress_bar.setValue(min(self.current, self.target))  # Ограничиваем значение прогресс-бара целью
         self.collected_value.setText(str(self.current))
-        self.remaining_value.setText(str(self.target - self.current))
 
-        percent = int((self.current / self.target) * 100) if self.target > 0 else 0
+        # Вычисляем оставшееся количество (не меньше 0)
+        remaining = max(0, self.target - self.current)
+        self.remaining_value.setText(str(remaining))
+
+        # Вычисляем процент выполнения (ограничиваем 999%)
+        percent = min(int((self.current / self.target) * 100) if self.target > 0 else 0, 999)
         self.percent_value.setText(f"{percent}%")
 
     def reset_progress(self):
