@@ -480,8 +480,13 @@ class MainWindow(QMainWindow):
 
             if reply == QMessageBox.StandardButton.Yes:
                 self.bot_engine.stop()
-                # Гарантируем сохранение статистики
+                # Гарантируем сохранение статистики и прогресса
                 if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager is not None:
+                    # Добавляем ключи текущей сессии к общему прогрессу перед сохранением
+                    if (hasattr(self.bot_engine.stats_manager, 'keys_current') and
+                            self.bot_engine.stats.get("keys_collected", 0) > 0):
+                        self.bot_engine.stats_manager.keys_current += self.bot_engine.stats["keys_collected"]
+                    # Затем сохраняем общий прогресс
                     self.bot_engine.stats_manager.save_stats()
                 event.accept()
             else:
@@ -489,5 +494,10 @@ class MainWindow(QMainWindow):
         else:
             # Сохраняем статистику даже если бот не запущен
             if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager is not None:
+                # Добавляем ключи текущей сессии к общему прогрессу перед сохранением
+                if (hasattr(self.bot_engine.stats_manager, 'keys_current') and
+                        self.bot_engine.stats.get("keys_collected", 0) > 0):
+                    self.bot_engine.stats_manager.keys_current += self.bot_engine.stats["keys_collected"]
+                # Затем сохраняем общий прогресс
                 self.bot_engine.stats_manager.save_stats()
             event.accept()

@@ -48,8 +48,17 @@ class HomeWidget(QWidget):
                     self.bot_engine.stats_manager.keys_target = self.target_keys
 
                 # Аналогично для keys_current
-                if not hasattr(self.bot_engine.stats_manager, 'keys_current'):
-                    self.bot_engine.stats_manager.keys_current = self.bot_engine.stats.get("keys_collected", 0)
+                if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
+                    if hasattr(self.bot_engine.stats_manager, 'keys_target'):
+                        self.target_keys = self.bot_engine.stats_manager.keys_target
+                    else:
+                        # Если атрибута нет, инициализируем его
+                        self.bot_engine.stats_manager.keys_target = self.target_keys
+
+                    # Не меняем значение keys_collected в bot_engine.stats
+                    # Это гарантирует, что при запуске счетчик текущих ключей будет 0
+                    if not hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                        self.bot_engine.stats_manager.keys_current = 0  # Инициализируем, если не существует
         except Exception as e:
             self._py_logger.warning(f"Не удалось загрузить целевое значение ключей: {e}")
 
@@ -95,8 +104,8 @@ class HomeWidget(QWidget):
 
         # Если лицензия валидна или не требуется проверка, запускаем бота
         if self.bot_engine.start():
-            # Важно: сбрасываем статистику при запуске нового сеанса
-            # Это гарантирует, что при запуске считаем именно новый прогресс
+            # Важно: ТОЛЬКО сбрасываем счетчик ключей текущей сессии,
+            # но НЕ сбрасываем общий прогресс в stats_manager.keys_current
             self.bot_engine.stats["keys_collected"] = 0
             self.bot_engine.stats["silver_collected"] = 0
 
@@ -232,7 +241,11 @@ class HomeWidget(QWidget):
         # Инициализируем его с текущими значениями прогресса
         current_keys = 0
         if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
-            current_keys = self.bot_engine.stats_manager.keys_current
+            # Используем значение keys_current (общий прогресс) для прогресс-бара
+            if hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                current_keys = self.bot_engine.stats_manager.keys_current
+            else:
+                self.bot_engine.stats_manager.keys_current = 0
 
         self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=current_keys)
         self.keys_progress_bar.progress_reset.connect(self.reset_keys_progress)
@@ -480,20 +493,20 @@ class HomeWidget(QWidget):
                 # Сбрасываем прогресс в менеджере статистики
                 self.bot_engine.stats_manager.reset_keys_progress()
             else:
-                # Если метода нет, сбрасываем счетчик ключей вручную
+                # Если метода нет, сбрасываем общий прогресс ключей вручную
                 self.bot_engine.stats_manager.keys_current = 0
                 if hasattr(self.bot_engine.stats_manager, 'save_keys_progress'):
                     self.bot_engine.stats_manager.save_keys_progress()
                 else:
                     self.bot_engine.stats_manager.save_stats()  # Используем обычный метод сохранения
 
-            # Обновляем счетчик ключей в статистике бота
+            # Сбрасываем счетчик ключей в статистике текущей сессии
             self.bot_engine.stats["keys_collected"] = 0
 
             # Обновляем отображение статистики
             self.update_stats(self.bot_engine.stats)
         else:
-            # Если stats_manager недоступен, просто обнуляем статистику
+            # Если stats_manager недоступен, просто обнуляем статистику текущей сессии
             self.bot_engine.stats["keys_collected"] = 0
             self.update_stats(self.bot_engine.stats)
 

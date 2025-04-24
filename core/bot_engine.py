@@ -305,6 +305,18 @@ class BotEngine:
                 self.stats["keys_collected"] += keys_count
                 self.logger.info(f"🔑 Получено {keys_count} ключей. Всего собрано: {self.stats['keys_collected']}")
 
+                if hasattr(self, 'stats_manager') and self.stats_manager is not None:
+                    # Просто для отладки записываем значение до и после
+                    old_keys_current = getattr(self.stats_manager, 'keys_current', 0)
+
+                    # Обновляем только общий прогресс, но не текущую сессию
+                    # Текущая сессия обновляется выше через self.stats["keys_collected"]
+                    if hasattr(self.stats_manager, 'keys_current'):
+                        # Не добавляем ключи дважды, так как они уже будут добавлены
+                        # при вызове save_stats() или при закрытии приложения
+                        # self.stats_manager.keys_current += keys_count
+                        self.logger.debug(f"Текущий общий прогресс ключей: {self.stats_manager.keys_current}")
+
             # Detect and count silver before clicking to exit
             silver_count = self.image_matcher.detect_silver(screen_data)
             if silver_count > 0:

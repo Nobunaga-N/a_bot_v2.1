@@ -141,8 +141,14 @@ class StatsManager:
             with open(self.stats_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
 
-            # Сохраняем также прогресс ключей
-            self.save_keys_progress()
+            # Обновление общего прогресса ключей: добавляем ключи текущей сессии к общему прогрессу
+            if hasattr(self, 'keys_current') and self.current_stats.get("keys_collected", 0) > 0:
+                # Добавляем собранные в текущей сессии ключи к общему прогрессу
+                self.keys_current += self.current_stats["keys_collected"]
+                # Сбрасываем счетчик текущей сессии - это важно!
+                self.current_stats["keys_collected"] = 0
+                # Сохраняем обновленное значение прогресса
+                self.save_keys_progress()
 
             self.logger.info("Статистика успешно сохранена.")
             return True
@@ -415,8 +421,8 @@ class StatsManager:
                 self.keys_current = data.get("current", 0)
                 self.logger.info(f"Загружен прогресс сбора ключей: {self.keys_current}/{self.keys_target}")
 
-                # Синхронизируем с текущей статистикой
-                self.current_stats["keys_collected"] = self.keys_current
+                # Эта строка удалена, чтобы отделить общий прогресс от статистики текущей сессии
+                # self.current_stats["keys_collected"] = self.keys_current
 
                 return True
             except Exception as e:
@@ -429,12 +435,11 @@ class StatsManager:
         progress_file = os.path.join(self.stats_dir, "keys_progress.json")
 
         try:
-            # Синхронизируем с текущей статистикой
-            self.keys_current = self.current_stats["keys_collected"]
-
+            # Используем текущий общий прогресс (self.keys_current),
+            # а не значение из текущей сессии (current_stats["keys_collected"])
             data = {
                 "target": self.keys_target,
-                "current": self.keys_current,
+                "current": self.keys_current,  # Общий прогресс, накопленный за все сессии
                 "last_updated": datetime.datetime.now().isoformat()
             }
 
@@ -462,3 +467,34 @@ class StatsManager:
         self.keys_target = target
         self.save_keys_progress()
         self.logger.info(f"Обновлена цель по сбору ключей: {target}")
+
+    def add_to_keys_progress(self, keys_to_add=None):
+        """
+        Добавляет собранные в текущей сессии ключи к общему прогрессу.
+        Если количество ключей не указано, берется из текущей статистики.
+
+        Args:
+            keys_to_add (int, optional): Количество ключей для добавления
+
+        Returns:
+            int: Обновленное общее количество ключей
+        """
+        if keys_to_add is None:
+            keys_to_add = self.current_stats["keys_collected"]
+
+        if keys_to_add > 0:
+            # Добавляем ключи текущей сессии к общему прогрессу
+            self.keys_current += keys_to_add
+
+            # Сбрасываем счетчик ключей текущей сессии
+            # Это опционально и может быть закомментировано,
+            # если нужно сохранить статистику текущей сессии
+            # self.current_stats["keys_collected"] = 0
+
+            # Сохраняем обновленный прогресс
+            self.save_keys_progress()
+
+            self.logger.info(f"Добавлено {keys_to_add} ключей к общему прогрессу. "
+                             f"Общий прогресс: {self.keys_current}/{self.keys_target}")
+
+        return self.keys_current
