@@ -9,7 +9,7 @@ from PyQt6.QtGui import QFont, QColor
 from gui.styles import Styles
 from gui.components.stat_card import StatCard
 from gui.components.styled_table import StyledTable
-from gui.widgets.chart_widgets import BattlesChartWidget, KeysChartWidget
+from gui.widgets.chart_widgets import BattlesChartWidget, KeysChartWidget, SilverChartWidget
 
 
 class StatsWidget(QWidget):
@@ -147,14 +147,14 @@ class StatsWidget(QWidget):
         )
         stats_layout.addWidget(self.total_keys_card)
 
-        # Карточка с общим временем игры
-        self.total_time_card = StatCard(
-            "Общее время игры",
-            "0 ч",
+        # Карточка с серебром (заменяем карточку со временем игры)
+        self.total_silver_card = StatCard(
+            "Всего серебра",
+            "0K",
             Styles.COLORS["primary"],
-            "time"
+            "silver"
         )
-        stats_layout.addWidget(self.total_time_card)
+        stats_layout.addWidget(self.total_silver_card)
 
         # Устанавливаем фиксированную высоту для контейнера карточек
         stats_container = QWidget()
@@ -171,7 +171,7 @@ class StatsWidget(QWidget):
 
         # Создаем виджеты графиков
         self.battles_chart_widget = BattlesChartWidget()
-        self.keys_chart_widget = KeysChartWidget()
+        self.silver_chart_widget = SilverChartWidget()  # Заменяем график ключей на график серебра
 
         # Добавляем виджеты графиков в лейаут
         battles_chart_frame = QFrame()
@@ -182,15 +182,34 @@ class StatsWidget(QWidget):
         battles_chart_layout.addWidget(self.battles_chart_widget)
         charts_layout.addWidget(battles_chart_frame)
 
-        keys_chart_frame = QFrame()
-        keys_chart_frame.setObjectName("section_box")
-        keys_chart_layout = QVBoxLayout(keys_chart_frame)
-        keys_chart_layout.setContentsMargins(0, 0, 0, 0)
-        keys_chart_layout.setSpacing(0)
-        keys_chart_layout.addWidget(self.keys_chart_widget)
-        charts_layout.addWidget(keys_chart_frame)
+        silver_chart_frame = QFrame()
+        silver_chart_frame.setObjectName("section_box")
+        silver_chart_layout = QVBoxLayout(silver_chart_frame)
+        silver_chart_layout.setContentsMargins(0, 0, 0, 0)
+        silver_chart_layout.setSpacing(0)
+        silver_chart_layout.addWidget(self.silver_chart_widget)
+        charts_layout.addWidget(silver_chart_frame)
 
         scroll_layout.addLayout(charts_layout)
+
+        # Добавляем еще один ряд для графика ключей
+        keys_chart_layout = QHBoxLayout()
+        keys_chart_layout.setSpacing(15)
+        keys_chart_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Создаем и добавляем виджет графика ключей
+        self.keys_chart_widget = KeysChartWidget()
+
+        keys_chart_frame = QFrame()
+        keys_chart_frame.setObjectName("section_box")
+        keys_chart_box_layout = QVBoxLayout(keys_chart_frame)
+        keys_chart_box_layout.setContentsMargins(0, 0, 0, 0)
+        keys_chart_box_layout.setSpacing(0)
+        keys_chart_box_layout.addWidget(self.keys_chart_widget)
+
+        keys_chart_layout.addWidget(keys_chart_frame)
+
+        scroll_layout.addLayout(keys_chart_layout)
 
         # Добавляем растяжку внизу для лучшего отображения на разных разрешениях
         scroll_layout.addStretch(1)
@@ -225,10 +244,10 @@ class StatsWidget(QWidget):
 
         # Таблица статистики
         self.daily_stats_table = StyledTable()
-        self.daily_stats_table.setColumnCount(8)
+        self.daily_stats_table.setColumnCount(9)  # Увеличиваем количество столбцов для серебра
         self.daily_stats_table.setHorizontalHeaderLabels([
             "Дата", "Боёв", "Победы", "Поражения",
-            "% побед", "Ключей", "Ключей/победа", "Потерь связи"
+            "% побед", "Ключей", "Ключей/победа", "Серебро", "Потерь связи"
         ])
 
         # Устанавливаем растяжение для стилизованной таблицы
@@ -258,6 +277,10 @@ class StatsWidget(QWidget):
         key_legend = QLabel("● Ключи")
         key_legend.setStyleSheet(f"color: {Styles.COLORS['warning']};")
         legend_layout.addWidget(key_legend)
+
+        silver_legend = QLabel("● Серебро")
+        silver_legend.setStyleSheet(f"color: {Styles.COLORS['primary']};")
+        legend_layout.addWidget(silver_legend)
 
         connection_legend = QLabel("● Потери связи")
         connection_legend.setStyleSheet(f"color: {Styles.COLORS['accent']};")
@@ -333,7 +356,16 @@ class StatsWidget(QWidget):
         self.win_rate_card.set_value(f"{win_rate:.1f}%")
 
         self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
-        self.total_time_card.set_value(f"{stats_data.get('total_duration_hours', 0):.1f} ч")
+
+        # Форматируем значение серебра с K на конце
+        silver_collected = stats_data["stats"].get("silver_collected", 0)
+        silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
+        self.total_silver_card.set_value(silver_formatted)
+
+        # Отображаем общее время игры при наличии данных о продолжительности
+        total_hours = stats_data.get("total_duration_hours", 0)
+        if hasattr(self, 'total_time_card'):
+            self.total_time_card.set_value(f"{total_hours:.1f} ч")
 
     def update_trend_charts(self):
         """Обновляет графики трендов с последними данными."""
@@ -350,6 +382,7 @@ class StatsWidget(QWidget):
                 # Недостаточно данных - очищаем графики
                 self.battles_chart_widget.clear()
                 self.keys_chart_widget.clear()
+                self.silver_chart_widget.clear()
                 return
 
             # Обновляем графики (без частой перезагрузки кэша)
@@ -358,6 +391,7 @@ class StatsWidget(QWidget):
                 # Обновляем графики только если данные изменились
                 self.battles_chart_widget.update_chart(trend_data)
                 self.keys_chart_widget.update_chart(trend_data)
+                self.silver_chart_widget.update_chart(trend_data)
 
         except Exception as e:
             import logging
@@ -402,8 +436,13 @@ class StatsWidget(QWidget):
                 keys_per_victory = day.get("keys_per_victory", 0)
                 self.daily_stats_table.setItem(row, 6, QTableWidgetItem(f"{keys_per_victory:.1f}"))
 
+                # Собрано серебра (с форматированием K)
+                silver_collected = day["stats"].get("silver_collected", 0)
+                silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
+                self.daily_stats_table.setItem(row, 7, QTableWidgetItem(silver_formatted))
+
                 # Потери связи
-                self.daily_stats_table.setItem(row, 7, QTableWidgetItem(str(day["stats"]["connection_losses"])))
+                self.daily_stats_table.setItem(row, 8, QTableWidgetItem(str(day["stats"]["connection_losses"])))
 
             # Настройка цветовой индикации
             self.daily_stats_table.customize_cell_colors()

@@ -353,7 +353,7 @@ class MainWindow(QMainWindow):
                 # Записываем заголовок
                 writer.writerow([
                     "Дата", "Боёв", "Победы", "Поражения", "% побед",
-                    "Ключей собрано", "Ключей за победу", "Потери связи", "Ошибки"
+                    "Ключей собрано", "Ключей за победу", "Серебра собрано", "Потери связи", "Ошибки"
                 ])
 
                 # Записываем ежедневную статистику
@@ -361,6 +361,8 @@ class MainWindow(QMainWindow):
                     battles = day["stats"]["victories"] + day["stats"]["defeats"]
                     win_rate = day.get("win_rate", 0)
                     keys_per_victory = day.get("keys_per_victory", 0)
+                    silver_collected = day["stats"].get("silver_collected", 0)
+                    silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
 
                     writer.writerow([
                         day["date"],
@@ -370,6 +372,7 @@ class MainWindow(QMainWindow):
                         f"{win_rate:.1f}",
                         day["stats"]["keys_collected"],
                         f"{keys_per_victory:.1f}",
+                        silver_formatted,
                         day["stats"]["connection_losses"],
                         day["stats"]["errors"]
                     ])
@@ -383,6 +386,8 @@ class MainWindow(QMainWindow):
                 win_rate_total = (total_stats["victories"] / battles_total) * 100 if battles_total > 0 else 0
                 keys_per_victory_total = (total_stats["keys_collected"] / total_stats["victories"]) if total_stats[
                                                                                                            "victories"] > 0 else 0
+                silver_total = total_stats.get("silver_collected", 0)
+                silver_total_formatted = f"{silver_total:.1f}K" if silver_total > 0 else "0K"
 
                 writer.writerow([
                     "Всего",
@@ -392,6 +397,7 @@ class MainWindow(QMainWindow):
                     f"{win_rate_total:.1f}",
                     total_stats["keys_collected"],
                     f"{keys_per_victory_total:.1f}",
+                    silver_total_formatted,
                     total_stats["connection_losses"],
                     total_stats["errors"]
                 ])

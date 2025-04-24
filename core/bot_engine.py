@@ -63,7 +63,8 @@ class BotEngine:
             "defeats": 0,
             "connection_losses": 0,
             "errors": 0,
-            "keys_collected": 0  # New statistic for tracking keys
+            "keys_collected": 0,  # Статистика по ключам
+            "silver_collected": 0  # Новая статистика по серебру
         }
 
         # Инициализация stats_manager
@@ -304,9 +305,16 @@ class BotEngine:
                 self.stats["keys_collected"] += keys_count
                 self.logger.info(f"🔑 Получено {keys_count} ключей. Всего собрано: {self.stats['keys_collected']}")
 
-                # If signals is set, emit stats_updated to refresh UI
-                if self.signals:
-                    self.signals.stats_updated.emit(self.stats)
+            # Detect and count silver before clicking to exit
+            silver_count = self.image_matcher.detect_silver(screen_data)
+            if silver_count > 0:
+                self.stats["silver_collected"] += silver_count
+                self.logger.info(
+                    f"🔶 Получено {silver_count}K серебра. Всего собрано: {self.stats['silver_collected']}K")
+
+            # If signals is set, emit stats_updated to refresh UI
+            if self.signals:
+                self.signals.stats_updated.emit(self.stats)
 
             # Continue with normal flow - exit after win
             self.adb.tap(*self.click_coords["exit_after_win"])

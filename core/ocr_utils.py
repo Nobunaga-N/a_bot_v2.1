@@ -131,3 +131,58 @@ class OCRHelper:
 
         # Если что-то пошло не так, возвращаем значение по умолчанию
         return default_val
+
+    def recognize_text(self, image, default_val=""):
+        """
+        Распознает произвольный текст на изображении с помощью OCR.
+
+        Args:
+            image: Изображение для распознавания (numpy array)
+            default_val: Значение по умолчанию, если распознавание не удалось
+
+        Returns:
+            Распознанный текст или значение по умолчанию
+        """
+        if not self.ocr_available:
+            return default_val
+
+        try:
+            # Предварительная обработка изображения для лучшего распознавания
+            # Увеличиваем размер для лучшего распознавания
+            height, width = image.shape[:2]
+            image = cv2.resize(image, (width * 3, height * 3), interpolation=cv2.INTER_CUBIC)
+
+            # Конвертируем в оттенки серого, если изображение цветное
+            if len(image.shape) > 2:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image
+
+            # Бинаризация для улучшения распознавания текста
+            _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+            # Используем morph close для соединения частей символов
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+            # Конвертируем в PIL Image для pytesseract
+            from PIL import Image
+            pil_img = Image.fromarray(thresh)
+
+            # Настраиваем Tesseract для распознавания текста (включая цифры, точки и буквы K/k)
+            custom_config = r'--oem 3 --psm 6'
+
+            # Распознавание текста
+            result = pytesseract.image_to_string(pil_img, config=custom_config).strip()
+            self.logger.debug(f"OCR результат: '{result}'")
+
+            if result:
+                return result
+            else:
+                self.logger.warning("⚠ OCR не смог распознать текст")
+
+        except Exception as e:
+            self.logger.error(f"🚨 Ошибка при OCR-распознавании текста: {e}")
+
+        # Если что-то пошло не так, возвращаем значение по умолчанию
+        return default_val

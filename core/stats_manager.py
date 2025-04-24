@@ -40,7 +40,8 @@ class StatsManager:
             "defeats": 0,
             "connection_losses": 0,
             "errors": 0,
-            "keys_collected": 0
+            "keys_collected": 0,
+            "silver_collected": 0  # Добавляем учет серебра
         }
 
         # Historical stats with timestamps
@@ -383,7 +384,8 @@ class StatsManager:
             "defeats": [],
             "win_rates": [],
             "keys_collected": [],
-            "keys_per_victory": []
+            "keys_per_victory": [],
+            "silver_collected": []  # Добавляем данные по серебру
         }
 
         for day in daily_data:
@@ -393,8 +395,11 @@ class StatsManager:
             trend_data["win_rates"].append(round(day.get("win_rate", 0), 1))
             trend_data["keys_collected"].append(day["stats"]["keys_collected"])
             trend_data["keys_per_victory"].append(round(day.get("keys_per_victory", 0), 1))
+            # Добавляем данные серебра
+            trend_data["silver_collected"].append(day["stats"].get("silver_collected", 0))
 
-        self.logger.debug(f"Тренд данные: даты={trend_data['dates']}, ключи={trend_data['keys_collected']}")
+        self.logger.debug(
+            f"Тренд данные: даты={trend_data['dates']}, ключи={trend_data['keys_collected']}, серебро={trend_data['silver_collected']}")
         return trend_data
 
     def load_keys_progress(self):

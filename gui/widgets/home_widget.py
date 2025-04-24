@@ -163,14 +163,14 @@ class HomeWidget(QWidget):
         stats_layout.setSpacing(15)
         stats_layout.setContentsMargins(0, 0, 0, 0)  # Убираем внутренние отступы
 
-        # Карточка с количеством боев
-        self.battles_card = StatCard(
-            "Боёв начато",
-            "0",
+        # Карточка с серебром (заменяем карточку с количеством боев)
+        self.silver_card = StatCard(
+            "Серебро собрано",
+            "0K",
             Styles.COLORS["primary"],
-            "battle"
+            "silver"
         )
-        stats_layout.addWidget(self.battles_card)
+        stats_layout.addWidget(self.silver_card)
 
         # Карточка с победами
         self.victories_card = StatCard(
@@ -250,32 +250,50 @@ class HomeWidget(QWidget):
         self.runtime_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
         metrics_content_layout.addWidget(self.runtime_label, 0, 1)
 
+        # Количество боев (перенесено из карточки)
+        metrics_content_layout.addWidget(QLabel("Боёв начато:"), 1, 0)
+        self.battles_label = QLabel("0")
+        self.battles_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
+        metrics_content_layout.addWidget(self.battles_label, 1, 1)
+
         # Ключей за победу
-        metrics_content_layout.addWidget(QLabel("Ключей за победу:"), 1, 0)
+        metrics_content_layout.addWidget(QLabel("Ключей за победу:"), 2, 0)
         self.keys_per_victory_label = QLabel("0")
         self.keys_per_victory_label.setStyleSheet(f"color: {Styles.COLORS['warning']};")
-        metrics_content_layout.addWidget(self.keys_per_victory_label, 1, 1)
+        metrics_content_layout.addWidget(self.keys_per_victory_label, 2, 1)
+
+        # Серебра за победу (новый показатель)
+        metrics_content_layout.addWidget(QLabel("Серебра за победу:"), 3, 0)
+        self.silver_per_victory_label = QLabel("0K")
+        self.silver_per_victory_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
+        metrics_content_layout.addWidget(self.silver_per_victory_label, 3, 1)
 
         # Успешность
-        metrics_content_layout.addWidget(QLabel("Успешность:"), 2, 0)
+        metrics_content_layout.addWidget(QLabel("Успешность:"), 4, 0)
         self.success_rate_label = QLabel("0%")
         self.success_rate_label.setStyleSheet(f"color: {Styles.COLORS['secondary']};")
-        metrics_content_layout.addWidget(self.success_rate_label, 2, 1)
+        metrics_content_layout.addWidget(self.success_rate_label, 4, 1)
 
         # Потери соединения
-        metrics_content_layout.addWidget(QLabel("Потери соединения:"), 3, 0)
+        metrics_content_layout.addWidget(QLabel("Потери соединения:"), 5, 0)
         self.connection_losses_label = QLabel("0")
         self.connection_losses_label.setStyleSheet(f"color: {Styles.COLORS['accent']};")
-        metrics_content_layout.addWidget(self.connection_losses_label, 3, 1)
+        metrics_content_layout.addWidget(self.connection_losses_label, 5, 1)
 
         # Ключей в час
-        metrics_content_layout.addWidget(QLabel("Ключей в час:"), 4, 0)
+        metrics_content_layout.addWidget(QLabel("Ключей в час:"), 6, 0)
         self.keys_per_hour_label = QLabel("0")
         self.keys_per_hour_label.setStyleSheet(f"color: {Styles.COLORS['warning']};")
-        metrics_content_layout.addWidget(self.keys_per_hour_label, 4, 1)
+        metrics_content_layout.addWidget(self.keys_per_hour_label, 6, 1)
+
+        # Серебра в час (новый показатель)
+        metrics_content_layout.addWidget(QLabel("Серебра в час:"), 7, 0)
+        self.silver_per_hour_label = QLabel("0K")
+        self.silver_per_hour_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
+        metrics_content_layout.addWidget(self.silver_per_hour_label, 7, 1)
 
         # Растягиваем сетку показателей вниз
-        metrics_content_layout.setRowStretch(5, 1)
+        metrics_content_layout.setRowStretch(8, 1)
 
         metrics_layout.addWidget(metrics_content, 1)
         layout.addWidget(metrics_frame, 1)
@@ -338,7 +356,14 @@ class HomeWidget(QWidget):
             stats (dict): Статистика бота
         """
         # Обновляем карточки
-        self.battles_card.set_value(str(stats.get("battles_started", 0)))
+        self.battles_label.setText(
+            str(stats.get("battles_started", 0)))  # Кол-во боев перенесено в показатели производительности
+
+        # Форматируем значение серебра для карточки с K на конце
+        silver_value = stats.get("silver_collected", 0)
+        silver_formatted = f"{silver_value:.1f}K" if silver_value > 0 else "0K"
+        self.silver_card.set_value(silver_formatted)
+
         self.victories_card.set_value(str(stats.get("victories", 0)))
         self.defeats_card.set_value(str(stats.get("defeats", 0)))
         self.keys_card.set_value(str(stats.get("keys_collected", 0)))
@@ -360,20 +385,33 @@ class HomeWidget(QWidget):
             if victories > 0:
                 keys_per_victory = stats.get("keys_collected", 0) / victories
                 self.keys_per_victory_label.setText(f"{keys_per_victory:.1f}")
+
+                # Вычисляем количество серебра за победу
+                silver_per_victory = stats.get("silver_collected", 0) / victories
+                self.silver_per_victory_label.setText(f"{silver_per_victory:.1f}K")
             else:
                 self.keys_per_victory_label.setText("0")
+                self.silver_per_victory_label.setText("0K")
         else:
             self.success_rate_label.setText("0%")
             self.keys_per_victory_label.setText("0")
+            self.silver_per_victory_label.setText("0K")
 
-        # Вычисляем количество ключей в час
+        # Вычисляем количество ключей и серебра в час
         if self.start_time:
             elapsed_hours = (time.time() - self.start_time) / 3600
             if elapsed_hours > 0:
                 keys_per_hour = stats.get("keys_collected", 0) / elapsed_hours
                 self.keys_per_hour_label.setText(f"{keys_per_hour:.1f}")
+
+                silver_per_hour = stats.get("silver_collected", 0) / elapsed_hours
+                self.silver_per_hour_label.setText(f"{silver_per_hour:.1f}K")
             else:
                 self.keys_per_hour_label.setText("0")
+                self.silver_per_hour_label.setText("0K")
+        else:
+            self.keys_per_hour_label.setText("0")
+            self.silver_per_hour_label.setText("0K")
 
     def update_runtime(self):
         """Обновляет отображение времени работы бота."""

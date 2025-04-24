@@ -264,3 +264,102 @@ class ImageMatcher:
 
         # Only return a match if the confidence is high enough
         return best_match if best_score > 0.5 else None
+
+    def detect_silver(self, screen_data: bytes) -> float:
+        """
+        Детектирует количество серебра, отображаемого на экране победы.
+
+        Args:
+            screen_data: Данные снимка экрана
+
+        Returns:
+            Количество обнаруженного серебра (в тысячах) или 0, если ничего не найдено
+        """
+        try:
+            # Импортируем OCRHelper
+            from core.ocr_utils import OCRHelper
+
+            # Создаем OCR Helper при первом использовании
+            if not hasattr(self, 'ocr_helper'):
+                self.ocr_helper = OCRHelper()
+
+            # Конвертация данных экрана в формат OpenCV
+            import cv2
+            import numpy as np
+            screen_array = np.frombuffer(screen_data, dtype=np.uint8)
+            screen_img = cv2.imdecode(screen_array, cv2.IMREAD_COLOR)
+            if screen_img is None:
+                self.logger.error("🚨 Не удалось декодировать изображение экрана")
+                return 0
+
+            # Сначала находим иконку серебра
+            silver_icon = self.load_template("silver_icon.png")
+            if silver_icon is None:
+                self.logger.warning("⚠ Не найден шаблон серебра (silver_icon.png)")
+                return 0  # Возвращаем значение по умолчанию
+
+            # Поиск иконки серебра на экране
+            result = cv2.matchTemplate(screen_img, silver_icon, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+            # Если иконка серебра найдена с достаточной уверенностью
+            if max_val >= 0.7:
+                silver_x, silver_y = max_loc
+                silver_width, silver_height = silver_icon.shape[1], silver_icon.shape[0]
+
+                # Определяем область под иконкой серебра, где отображается число
+                # Делаем область немного шире для лучшего захвата
+                number_region_x = max(0, silver_x - 10)
+                number_region_y = silver_y + silver_height
+                number_region_width = min(silver_width + 40, screen_img.shape[1] - number_region_x)
+                number_region_height = silver_height  # Примерная высота числа
+
+                # Извлекаем область, где должно быть число
+                if (number_region_y + number_region_height <= screen_img.shape[0] and
+                        number_region_x + number_region_width <= screen_img.shape[1]):
+                    number_region = screen_img[
+                                    number_region_y:number_region_y + number_region_height,
+                                    number_region_x:number_region_x + number_region_width
+                                    ]
+
+                    # Используем OCR для распознавания числа серебра
+                    # Особенность: серебро отображается как число с 'K' на конце (76.6K)
+                    silver_text = self.ocr_helper.recognize_text(number_region)
+
+                    # Очищаем текст от нежелательных символов и выделяем число
+                    import re
+                    # Ищем число, возможно с точкой, перед K/k
+                    silver_match = re.search(r'(\d+(?:\.\d+)?)[Kk]', silver_text)
+
+                    if silver_match:
+                        silver_value = float(silver_match.group(1))
+                        self.logger.info(f"🔶 Распознано {silver_value}K серебра")
+                        return silver_value
+                    else:
+                        # Попробуем просто найти любое число с точкой или без
+                        silver_match = re.search(r'(\d+(?:\.\d+)?)', silver_text)
+                        if silver_match:
+                            silver_value = float(silver_match.group(1))
+                            # Проверяем, есть ли 'K' где-то в тексте
+                            if 'k' in silver_text.lower():
+                                self.logger.info(f"🔶 Распознано {silver_value}K серебра (альтернативный метод)")
+                                return silver_value
+                            else:
+                                # Если K не найден, но значение больше 1000, предполагаем, что это в тысячах
+                                if silver_value > 1000:
+                                    silver_value /= 1000
+                                    self.logger.info(
+                                        f"🔶 Распознано {silver_value}K серебра (преобразовано из {silver_value * 1000})")
+                                    return silver_value
+                                return silver_value / 1000  # Преобразуем в тысячи для согласованности
+
+                # Если извлечение области не удалось, возвращаем значение по умолчанию
+                self.logger.warning("⚠ Не удалось извлечь область с числом серебра")
+                return 0  # Значение по умолчанию
+
+            self.logger.debug(f"❌ Иконка серебра не найдена на экране (max_val={max_val:.2f})")
+            return 0
+
+        except Exception as e:
+            self.logger.error(f"🚨 Ошибка при распознавании количества серебра: {e}")
+            return 0  # Возвращаем значение по умолчанию в случае ошибки

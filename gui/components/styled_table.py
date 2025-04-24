@@ -96,6 +96,10 @@ class StyledTable(QTableWidget):
                     elif col == 5 or col == 6:  # Колонки с ключами
                         item.setForeground(QColor(Styles.COLORS["warning"]))
 
+                    # Если ячейка содержит количество серебра (с K на конце)
+                    elif col == 7:  # Колонка с серебром
+                        item.setForeground(QColor(Styles.COLORS["primary"]))
+
                     # Если ячейка содержит победы
                     elif col == 2:  # Колонка с победами
                         item.setForeground(QColor(Styles.COLORS["secondary"]))
@@ -105,7 +109,7 @@ class StyledTable(QTableWidget):
                         item.setForeground(QColor(Styles.COLORS["accent"]))
 
                     # Если ячейка содержит потери связи
-                    elif col == 7:  # Колонка с потерями связи
+                    elif col == 8:  # Колонка с потерями связи (индекс изменен из-за добавления серебра)
                         value = int(item.text())
                         if value > 0:
                             item.setForeground(QColor(Styles.COLORS["accent"]))
