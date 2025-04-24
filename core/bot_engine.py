@@ -111,6 +111,8 @@ class BotEngine:
                     current_progress = self.stats_manager.keys_current
                     self.logger.info(
                         f"Добавляем {keys_collected} ключей из текущей сессии к общему прогрессу ({current_progress})")
+
+                    # Обновляем общий прогресс
                     self.stats_manager.keys_current += keys_collected
                     self.logger.info(f"Новое значение общего прогресса: {self.stats_manager.keys_current}")
 
@@ -120,8 +122,12 @@ class BotEngine:
                         self.logger.info(
                             f"Сохранение прогресса ключей: target={self.stats_manager.keys_target}, current={self.stats_manager.keys_current}")
 
+                    # ВАЖНО: Обнуляем ключи текущей сессии, чтобы избежать повторного добавления
+                    self.stats["keys_collected"] = 0
+
                 # Save stats when stopping the bot
-                self.stats_manager.save_stats()
+                # ВАЖНО: Используем метод save_stats БЕЗ добавления ключей
+                self.stats_manager.save_stats_without_keys_update()
 
             return True
         return False

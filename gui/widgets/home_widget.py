@@ -21,7 +21,7 @@ class HomeWidget(QWidget):
         super().__init__(parent)
         self.bot_engine = bot_engine
         self.signals = signals
-        self.license_validator = license_validator
+        self.license_validator = license_validator  # Добавляем валидатор лицензии
 
         # Добавляем логгер
         import logging
@@ -33,38 +33,36 @@ class HomeWidget(QWidget):
         # Цель по количеству ключей (можно изменить через настройки)
         self.target_keys = self.DEFAULT_TARGET_KEYS
 
+        # Инициализация значений для прогресс-бара (чтобы сразу отобразить его корректно)
+        self.current_progress = 0
+
         # Безопасная загрузка целевого значения из конфигурации или stats_manager
         from config import config
         try:
             # Сначала пробуем загрузить из конфигурации
             self.target_keys = config.get("bot", "target_keys", self.DEFAULT_TARGET_KEYS)
 
-            # Затем, если доступен stats_manager, проверяем наличие атрибута keys_target
+            # Затем, если доступен stats_manager, получаем текущие значения
             if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
-                # Принудительно перезагружаем прогресс ключей из файла для гарантии актуальных данных
-                if hasattr(self.bot_engine.stats_manager, 'load_keys_progress'):
-                    self.bot_engine.stats_manager.load_keys_progress()
-                    self._py_logger.info("Принудительно перезагружен прогресс ключей при инициализации")
-
-                # Загружаем цель по ключам
+                # Загружаем цель из stats_manager
                 if hasattr(self.bot_engine.stats_manager, 'keys_target'):
                     self.target_keys = self.bot_engine.stats_manager.keys_target
-                    self._py_logger.info(f"Загружена цель по ключам: {self.target_keys}")
                 else:
                     # Если атрибута нет, инициализируем его
                     self.bot_engine.stats_manager.keys_target = self.target_keys
-                    self._py_logger.info(f"Инициализирована новая цель по ключам: {self.target_keys}")
 
-                # Важно: не инициализируем keys_collected в bot_engine.stats значением keys_current
-                # Это гарантирует, что при запуске счетчик текущей сессии будет 0
-                self.bot_engine.stats["keys_collected"] = 0
-                self._py_logger.info("Счетчик ключей текущей сессии сброшен в 0")
+                # Загружаем текущий прогресс для быстрой инициализации
+                if hasattr(self.bot_engine.stats_manager, 'keys_current'):
+                    self.current_progress = self.bot_engine.stats_manager.keys_current
+                    self._py_logger.info(f"Быстрая инициализация прогресс-бара со значением: {self.current_progress}")
+                else:
+                    # Если атрибута нет, инициализируем его
+                    self.bot_engine.stats_manager.keys_current = 0
+                    self.current_progress = 0
         except Exception as e:
-            self._py_logger.warning(f"Не удалось загрузить целевое значение ключей: {e}")
-            import traceback
-            self._py_logger.warning(traceback.format_exc())
+            self._py_logger.warning(f"Не удалось загрузить значения для прогресс-бара: {e}")
 
-        # Инициализация UI
+        # Инициализация UI с предзагруженными значениями
         self.init_ui()
 
     def start_bot(self):
@@ -249,18 +247,9 @@ class HomeWidget(QWidget):
         keys_progress_layout.setSpacing(0)
 
         # Создаем виджет прогресса ключей
-        # ВАЖНО: Инициализируем его с общим значением прогресса из stats_manager
-        current_keys = 0
-        if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
-            # Используем значение keys_current (общий прогресс) для прогресс-бара
-            if hasattr(self.bot_engine.stats_manager, 'keys_current'):
-                current_keys = self.bot_engine.stats_manager.keys_current
-                self._py_logger.info(f"Восстановление прогресс-бара к значению: {current_keys}")
-            else:
-                self.bot_engine.stats_manager.keys_current = 0
-                self._py_logger.info("Инициализация keys_current в stats_manager со значением 0")
-
-        self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=current_keys)
+        # ВАЖНО: Используем предзагруженное значение self.current_progress для быстрой инициализации
+        self._py_logger.info(f"Инициализация прогресс-бара со значением: {self.current_progress}/{self.target_keys}")
+        self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=self.current_progress)
         self.keys_progress_bar.progress_reset.connect(self.reset_keys_progress)
         keys_progress_layout.addWidget(self.keys_progress_bar)
 
