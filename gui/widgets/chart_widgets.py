@@ -1466,6 +1466,60 @@ class SilverChartWidget(ResponsiveChartWidget):
                     }
                 };
 
+                // Новая функция форматирования значений серебра
+                function formatSilverValue(value) {
+                    // value приходит уже в тысячах (K)
+                    if (value === null || value === undefined || value === 0) {
+                        return "0K";
+                    }
+
+                    // Для очень маленьких значений (менее 1K)
+                    if (value < 1) {
+                        const formatted = value.toFixed(1);
+                        return formatted.endsWith('.0') ? formatted.replace('.0', '') + "K" : formatted + "K";
+                    }
+                    // От 1K до 999K - остаемся в K
+                    else if (value < 1000) {
+                        const formatted = value.toFixed(1);
+                        if (formatted.endsWith('.0')) {
+                            return Math.floor(value) + "K";
+                        } else {
+                            return formatted + "K";
+                        }
+                    }
+                    // От 1000K до 999999K - переходим в млн (1000K = 1млн)
+                    else if (value < 1000000) {
+                        const millions = value / 1000;
+                        const formatted = millions.toFixed(1);
+                        if (formatted.endsWith('.0')) {
+                            return Math.floor(millions) + "млн";
+                        } else {
+                            return formatted + "млн";
+                        }
+                    }
+                    // От 1000000K до 999999999K - переходим в млрд
+                    else if (value < 1000000000) {
+                        const billions = value / 1000000;
+                        const formatted = billions.toFixed(1);
+                        if (formatted.endsWith('.0')) {
+                            return Math.floor(billions) + "млрд";
+                        } else {
+                            return formatted + "млрд";
+                        }
+                    }
+                    // Свыше 1000000000K - переходим в трлн
+                    else {
+                        const trillions = value / 1000000000;
+                        const formatted = trillions.toFixed(1);
+                        if (formatted.endsWith('.0')) {
+                            return Math.floor(trillions) + "трлн";
+                        } else {
+                            return formatted + "трлн";
+                        }
+                    }
+                }
+
+                // Стандартная функция форматирования чисел (для числовых значений без суффиксов)
                 function formatNumber(num) {
                     return num.toLocaleString('ru-RU', {
                         minimumFractionDigits: 1,
@@ -1610,13 +1664,13 @@ class SilverChartWidget(ResponsiveChartWidget):
                         ctx.moveTo(baselineX, y);
                         ctx.lineTo(baselineX + graphWidth, y);
 
-                        // Подпись значения оси Y (серебро)
+                        // Подпись значения оси Y (серебро) - ИЗМЕНЕНО: используем formatSilverValue
                         if (canvasWidth > 300) {
                             ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
                             ctx.font = `${fontSize}px Arial`;
                             ctx.textAlign = 'right';
                             ctx.textBaseline = 'middle';
-                            ctx.fillText(value.toFixed(1) + 'K', baselineX - 5, y);
+                            ctx.fillText(formatSilverValue(value), baselineX - 5, y);
                         }
                     }
 
@@ -1767,7 +1821,8 @@ class SilverChartWidget(ResponsiveChartWidget):
                         tooltip.style.left = tooltipX + 'px';
                         tooltip.style.top = tooltipY + 'px';
 
-                        const valueText = formatNumber(hoveredBar.value) + "K";
+                        // ИЗМЕНЕНО: используем функцию formatSilverValue
+                        const valueText = formatSilverValue(hoveredBar.value);
 
                         // Улучшенное форматирование подсказки
                         tooltip.innerHTML = `
