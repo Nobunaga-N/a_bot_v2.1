@@ -9,6 +9,7 @@ from PyQt6.QtGui import QIcon, QColor, QFont
 from gui.styles import Styles
 from gui.components.stat_card import StatCard
 from gui.widgets.keys_progress_bar import KeysProgressBar
+from gui.components.fancy_button import FancyButton, FancyButtonGroup
 
 
 class HomeWidget(QWidget):
@@ -76,6 +77,10 @@ class HomeWidget(QWidget):
             # Обновляем элементы интерфейса
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
+
+            # Активируем кнопку остановки (вдавленное состояние)
+            self.stop_button.setActive(True)
+
             self.start_time = time.time()
             self.update_runtime()
 
@@ -166,19 +171,20 @@ class HomeWidget(QWidget):
         control_layout = QHBoxLayout()
         control_layout.setSpacing(15)
 
+        # Создаем группу для кнопок с эффектом переключения
+        self.button_group = FancyButtonGroup()
+
         # Кнопка запуска
-        self.start_button = QPushButton("▶ Запустить")
-        self.start_button.setObjectName("action_button_success")
-        self.start_button.setFixedHeight(40)
+        self.start_button = FancyButton("▶ Запустить", self, success=True)
         self.start_button.clicked.connect(self.start_bot)
+        self.button_group.addButton(self.start_button)
         control_layout.addWidget(self.start_button)
 
         # Кнопка остановки
-        self.stop_button = QPushButton("⛔ Остановить")
-        self.stop_button.setObjectName("action_button_danger")
-        self.stop_button.setFixedHeight(40)
+        self.stop_button = FancyButton("⛔ Остановить", self, success=False)
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_bot)
+        self.button_group.addButton(self.stop_button)
         control_layout.addWidget(self.stop_button)
 
         # Добавляем растягивающийся элемент для выравнивания кнопок по левому краю
@@ -329,6 +335,10 @@ class HomeWidget(QWidget):
         if self.bot_engine.stop():
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
+
+            # Активируем кнопку запуска (вдавленное состояние)
+            self.start_button.setActive(True)
+
             self.start_time = None
             self.update_runtime()
             return True
