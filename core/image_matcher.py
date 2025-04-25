@@ -207,64 +207,6 @@ class ImageMatcher:
             self.logger.error(f"🚨 Ошибка при распознавании количества ключей: {e}")
             return 12  # Возвращаем значение по умолчанию в случае ошибки
 
-    def _estimate_digit(self, contour):
-        """
-        Simple estimation of a digit based on contour properties.
-
-        Args:
-            contour: Contour to analyze
-
-        Returns:
-            Estimated digit (0-9)
-        """
-        # This is a very simplified approach - in practice, you'd want a more robust method
-        x, y, w, h = cv2.boundingRect(contour)
-        area = cv2.contourArea(contour)
-        perimeter = cv2.arcLength(contour, True)
-
-        # Simple heuristic: ratio of area to perimeter can help distinguish digits
-        ratio = area / perimeter if perimeter > 0 else 0
-
-        # Very basic digit estimation
-        if ratio < 4:
-            return 1  # Likely a thin digit like 1
-        elif ratio > 8:
-            return 0  # Likely a round digit like 0 or 8
-        elif 4 <= ratio < 6:
-            return 7  # Could be 7 or 4
-        else:
-            return 5  # Default to something in the middle
-
-    def _match_digit(self, digit_img, templates):
-        """
-        Match a digit image against templates.
-
-        Args:
-            digit_img: Image of the digit to match
-            templates: Dictionary of digit templates
-
-        Returns:
-            The best matching digit, or None if no good match found
-        """
-        best_match = None
-        best_score = 0
-
-        for digit, template in templates.items():
-            # Resize template to match digit size
-            if digit_img.shape[0] > 0 and digit_img.shape[1] > 0:
-                resized_template = cv2.resize(template, (digit_img.shape[1], digit_img.shape[0]))
-
-                # Compare the images
-                result = cv2.matchTemplate(digit_img, resized_template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, _ = cv2.minMaxLoc(result)
-
-                if max_val > best_score:
-                    best_score = max_val
-                    best_match = digit
-
-        # Only return a match if the confidence is high enough
-        return best_match if best_score > 0.5 else None
-
     def detect_silver(self, screen_data: bytes) -> float:
         """
         Детектирует количество серебра, отображаемого на экране победы.
