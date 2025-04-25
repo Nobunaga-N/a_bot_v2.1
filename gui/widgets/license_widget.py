@@ -38,25 +38,27 @@ class LicenseInfoCard(QFrame):
         # Содержимое
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(15, 15, 15, 15)
-        content_layout.setSpacing(15)
+        # Уменьшаем отступы для компактности
+        content_layout.setContentsMargins(15, 10, 15, 10)  # Уменьшенные отступы
+        content_layout.setSpacing(10)  # Уменьшенный интервал
 
         # Основная информация о лицензии
         status_layout = QHBoxLayout()
 
-        # Иконка лицензии
+        # Иконка лицензии (уменьшенная)
         self.status_icon = QLabel()
-        self.status_icon.setFixedSize(64, 64)
+        self.status_icon.setFixedSize(48, 48)  # Уменьшенный размер иконки
         self.status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_icon.setStyleSheet(f"""
             background-color: {Styles.COLORS['background_medium']};
-            border-radius: 32px;
-            font-size: 32px;
+            border-radius: 24px;
+            font-size: 24px;
         """)
         status_layout.addWidget(self.status_icon)
 
         # Информация о статусе
         info_layout = QVBoxLayout()
+        info_layout.setSpacing(5)  # Уменьшенный интервал
 
         self.status_title = QLabel()
         self.status_title.setStyleSheet(f"""
@@ -75,38 +77,11 @@ class LicenseInfoCard(QFrame):
 
         content_layout.addLayout(status_layout)
 
-        # Прогресс-бар срока лицензии
-        progress_layout = QVBoxLayout()
-
-        progress_title = QLabel("Осталось дней до истечения лицензии")
-        progress_title.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
-        progress_layout.addWidget(progress_title)
-
-        self.license_progress = QProgressBar()
-        self.license_progress.setTextVisible(True)
-        self.license_progress.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: {Styles.COLORS['background_medium']};
-                border-radius: 4px;
-                text-align: center;
-                color: {Styles.COLORS['text_primary']};
-                min-height: 25px;
-            }}
-
-            QProgressBar::chunk {{
-                background-color: {Styles.COLORS['primary']};
-                border-radius: 4px;
-            }}
-        """)
-        progress_layout.addWidget(self.license_progress)
-
-        content_layout.addLayout(progress_layout)
-
         # Детальная информация о лицензии (сетка)
         details_grid = QGridLayout()
         details_grid.setColumnStretch(1, 1)
         details_grid.setColumnStretch(3, 1)
-        details_grid.setVerticalSpacing(15)  # Увеличиваем вертикальное расстояние
+        details_grid.setVerticalSpacing(10)  # Уменьшенный интервал
 
         # Строка 1: Статус и дата истечения
         details_grid.addWidget(QLabel("Статус:"), 0, 0)
@@ -158,8 +133,8 @@ class LicenseInfoCard(QFrame):
             self.status_icon.setStyleSheet(f"""
                 background-color: {Styles.COLORS['secondary']};
                 color: {Styles.COLORS['background_dark']};
-                border-radius: 32px;
-                font-size: 32px;
+                border-radius: 24px;
+                font-size: 24px;
             """)
             self.status_value.setStyleSheet(f"color: {Styles.COLORS['secondary']};")
         elif status == "expired":
@@ -170,8 +145,8 @@ class LicenseInfoCard(QFrame):
             self.status_icon.setStyleSheet(f"""
                 background-color: {Styles.COLORS['accent']};
                 color: {Styles.COLORS['background_dark']};
-                border-radius: 32px;
-                font-size: 32px;
+                border-radius: 24px;
+                font-size: 24px;
             """)
             self.status_value.setStyleSheet(f"color: {Styles.COLORS['accent']};")
         else:
@@ -182,8 +157,8 @@ class LicenseInfoCard(QFrame):
             self.status_icon.setStyleSheet(f"""
                 background-color: {Styles.COLORS['warning']};
                 color: {Styles.COLORS['background_dark']};
-                border-radius: 32px;
-                font-size: 32px;
+                border-radius: 24px;
+                font-size: 24px;
             """)
             self.status_value.setStyleSheet(f"color: {Styles.COLORS['warning']};")
 
@@ -205,40 +180,6 @@ class LicenseInfoCard(QFrame):
             self.days_left_value.setStyleSheet(f"color: {Styles.COLORS['warning']};")
         else:
             self.days_left_value.setStyleSheet(f"color: {Styles.COLORS['accent']};")
-
-        # Прогресс-бар
-        # Предполагаем, что максимальный срок лицензии 365 дней
-        total_days = 365
-        if expiration:
-            # Если известна дата истечения, вычисляем общую продолжительность лицензии
-            now = datetime.datetime.utcnow()
-            if status == "valid":
-                # Предполагаем, что activation_date это дата активации, которую нужно получить
-                # Если нет точной даты активации, можно оценить ее по дате истечения и days_left
-                total_days = days_left  # Изначально инициализируем как оставшиеся дни
-
-                # Ищем дату активации в лицензионной информации
-                if hasattr(self, 'activation_date') and self.activation_date.text() != "Н/Д":
-                    try:
-                        activation_date = datetime.datetime.strptime(self.activation_date.text(), "%d.%m.%Y")
-                        total_original_days = (expiration - activation_date).days
-                        if total_original_days > 0:
-                            total_days = total_original_days
-                    except:
-                        pass
-
-                # Вычисляем прогресс как оставшиеся дни / общее количество дней
-                self.license_progress.setRange(0, total_days)
-                self.license_progress.setValue(days_left)
-                self.license_progress.setFormat(f"Осталось {days_left} из {total_days} дней (%p%)")
-            else:
-                self.license_progress.setRange(0, 100)
-                self.license_progress.setValue(0)
-                self.license_progress.setFormat("Лицензия недействительна")
-        else:
-            self.license_progress.setRange(0, 100)
-            self.license_progress.setValue(0)
-            self.license_progress.setFormat("Нет данных о лицензии")
 
 
 class LicenseActivationCard(QFrame):
