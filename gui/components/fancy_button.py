@@ -10,7 +10,8 @@ class FancyButton(QPushButton):
     Особенности:
     - Анимированный движущийся градиент
     - Эффекты при наведении и нажатии
-    - Прямоугольная форма с закругленными углами
+    - Прямоугольная форма без закругленных углов
+    - Серое отображение в активном состоянии
     """
 
     def __init__(self, text, parent=None, success=True):
@@ -46,6 +47,11 @@ class FancyButton(QPushButton):
             self.hover_color = QColor("#FF8E8F")  # Светло-красный
             self.text_color = QColor("#ffffff")  # Белый для лучшей читаемости на красном
 
+        # Цвета для активного (нажатого) состояния
+        self.active_primary_color = QColor("#6B7280")  # Серый
+        self.active_secondary_color = QColor("#4B5563")  # Темно-серый
+        self.active_text_color = QColor("#ffffff")  # Белый текст на сером фоне
+
         # Настройка шрифта
         font = self.font()
         font.setPointSize(10)
@@ -79,11 +85,11 @@ class FancyButton(QPushButton):
 
     def update_gradient(self):
         """Обновляет позицию градиента для анимации."""
-        self._gradient_position = (self._gradient_position + 0.05) % 2.0
-
-        # Обновляем только данную кнопку, а не весь интерфейс
-        # Это предотвращает нежелательное мерцание других кнопок
-        self.update()  # Перерисовка только этой кнопки
+        # Обновляем позицию градиента только если кнопка неактивна
+        # Это предотвратит мерцание при переключении кнопок
+        if not self._active:
+            self._gradient_position = (self._gradient_position + 0.05) % 2.0
+            self.update()  # Перерисовка только этой кнопки
 
     def get_pressed_scale(self):
         """Геттер для масштаба при нажатии."""
@@ -112,23 +118,17 @@ class FancyButton(QPushButton):
         if active and hasattr(self, 'group') and self.group:
             for button in self.group.buttons:
                 if button != self and button.isActive():
-                    # Отключаем таймер анимации градиента временно, чтобы избежать мерцания
-                    old_timer_state = button.animation_timer.isActive()
-                    if old_timer_state:
-                        button.animation_timer.stop()
-
-                    # Деактивируем другую кнопку
+                    # Деактивируем другую кнопку без манипуляций с таймером
                     button._active = False
                     button.update()
-
-                    # Восстанавливаем состояние таймера
-                    if old_timer_state:
-                        button.animation_timer.start()
 
         # Запускаем анимацию масштаба
         self.press_animation.stop()
 
         if active:
+            # Останавливаем анимацию градиента для активной кнопки
+            self.animation_timer.stop()
+
             # Слегка уменьшаем активную кнопку для показа "нажатого" состояния
             self.press_animation.setStartValue(self.get_pressed_scale())
             self.press_animation.setEndValue(0.97)
@@ -138,6 +138,10 @@ class FancyButton(QPushButton):
             self.press_animation.setStartValue(self.get_pressed_scale())
             self.press_animation.setEndValue(1.0)
             self.press_animation.start()
+
+            # Перезапускаем анимацию градиента
+            if not self.animation_timer.isActive():
+                self.animation_timer.start()
 
         # Обновляем только эту кнопку
         self.update()
@@ -159,20 +163,23 @@ class FancyButton(QPushButton):
 
         # Определяем цвета в зависимости от состояния
         if self._active:
-            # Активная кнопка имеет более насыщенный цвет
-            primary = self.secondary_color.darker(110)
-            secondary = self.primary_color.darker(110)
-            highlight = self.hover_color.darker(110)
+            # Активная кнопка имеет серый цвет
+            primary = self.active_primary_color
+            secondary = self.active_secondary_color
+            highlight = self.active_primary_color
+            text_color = self.active_text_color
         elif self.hovered:
             # Наведение - более яркие цвета
             primary = self.hover_color
             secondary = self.primary_color
             highlight = self.secondary_color
+            text_color = self.text_color
         else:
             # Обычное состояние
             primary = self.primary_color
             secondary = self.secondary_color
             highlight = self.primary_color
+            text_color = self.text_color
 
         # Создаем градиент с анимацией движения
         gradient = QLinearGradient(
@@ -190,13 +197,15 @@ class FancyButton(QPushButton):
         border_width = 2
         painter.setPen(QPen(QColor(255, 255, 255), border_width))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(
-            rect.adjusted(border_width // 2, border_width // 2, -border_width // 2, -border_width // 2), 10, 10)
+        # Используем drawRect вместо drawRoundedRect для прямоугольной формы
+        painter.drawRect(
+            rect.adjusted(border_width // 2, border_width // 2, -border_width // 2, -border_width // 2))
 
         # Рисуем фон кнопки
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gradient)
-        painter.drawRoundedRect(rect.adjusted(border_width, border_width, -border_width, -border_width), 8, 8)
+        # Используем drawRect вместо drawRoundedRect для прямоугольной формы
+        painter.drawRect(rect.adjusted(border_width, border_width, -border_width, -border_width))
 
         # Добавляем эффект блика только для неактивной и ненажатой кнопки
         if not self.pressed and not self._active:
@@ -211,7 +220,8 @@ class FancyButton(QPushButton):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(highlight_gradient)
             painter.setClipRect(highlight_rect)
-            painter.drawRoundedRect(highlight_rect, 8, 8)
+            # Используем drawRect вместо drawRoundedRect для прямоугольной формы
+            painter.drawRect(highlight_rect)
             painter.setClipping(False)
 
         # Рисуем текст с тенью
@@ -224,7 +234,7 @@ class FancyButton(QPushButton):
         painter.drawText(text_shadow_rect, Qt.AlignmentFlag.AlignCenter, self.text())
 
         # Основной текст
-        painter.setPen(self.text_color)
+        painter.setPen(text_color)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.text())
 
     def enterEvent(self, event):
