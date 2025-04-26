@@ -399,6 +399,9 @@ class StatsManager:
         else:  # "all" or any other value
             cutoff = datetime.datetime.min
 
+        # Логируем выбранный период и дату отсечения
+        self.logger.debug(f"Агрегация статистики для периода: {period}, дата отсечения: {cutoff}")
+
         # Filter history records by period
         filtered_records = []
         for record in self.history:
@@ -409,6 +412,9 @@ class StatsManager:
             except (KeyError, ValueError) as e:
                 self.logger.warning(f"Ошибка обработки записи истории: {e}")
 
+        # Логируем количество отфильтрованных записей
+        self.logger.debug(f"Отфильтровано записей для периода {period}: {len(filtered_records)}")
+
         # Aggregate stats
         aggregated = {
             "period": period,
@@ -417,31 +423,16 @@ class StatsManager:
             "stats": {}
         }
 
-        # Инициализируем структуру статистики на основе первой записи или пустую
-        if filtered_records:
-            first_record = filtered_records[0]
-            if "stats" in first_record:
-                aggregated["stats"] = {key: 0 for key in first_record["stats"]}
-            else:
-                aggregated["stats"] = {
-                    "battles_started": 0,
-                    "victories": 0,
-                    "defeats": 0,
-                    "connection_losses": 0,
-                    "errors": 0,
-                    "keys_collected": 0,
-                    "silver_collected": 0  # Убедимся, что это поле всегда присутствует
-                }
-        else:
-            aggregated["stats"] = {
-                "battles_started": 0,
-                "victories": 0,
-                "defeats": 0,
-                "connection_losses": 0,
-                "errors": 0,
-                "keys_collected": 0,
-                "silver_collected": 0  # Убедимся, что это поле всегда присутствует
-            }
+        # Обязательно инициализируем все поля статистики, включая серебро
+        aggregated["stats"] = {
+            "battles_started": 0,
+            "victories": 0,
+            "defeats": 0,
+            "connection_losses": 0,
+            "errors": 0,
+            "keys_collected": 0,
+            "silver_collected": 0  # Всегда инициализируем поле серебра
+        }
 
         # Add up stats from filtered records
         for record in filtered_records:
@@ -449,15 +440,43 @@ class StatsManager:
                 aggregated["total_duration_hours"] += record["duration_seconds"] / 3600
 
             if "stats" in record:
+                # Проверяем наличие поля silver_collected в каждой записи
+                if "silver_collected" not in record["stats"]:
+                    self.logger.warning(
+                        f"Поле silver_collected отсутствует в записи от {record.get('end_time', 'неизвестная дата')}")
+                    # Добавляем поле серебра со значением 0, если его нет
+                    record["stats"]["silver_collected"] = 0
+
+                # Суммируем все статистические данные
                 for key, value in record["stats"].items():
                     if key in aggregated["stats"]:
-                        aggregated["stats"][key] += value
+                        # Проверка типа данных для предотвращения ошибок
+                        if isinstance(value, (int, float)) and isinstance(aggregated["stats"][key], (int, float)):
+                            aggregated["stats"][key] += value
+                        else:
+                            # Логируем проблему с типами данных
+                            self.logger.warning(
+                                f"Несовместимые типы данных для ключа {key}: {type(value)} и {type(aggregated['stats'][key])}")
+                            # Устанавливаем безопасное значение по умолчанию
+                            if key == "silver_collected":
+                                aggregated["stats"][key] = 0
+                    else:
+                        # Если ключ отсутствует в агрегированных данных, добавляем его
+                        aggregated["stats"][key] = value
+
+        # Проверяем наличие и тип поля серебра после агрегации
+        if "silver_collected" not in aggregated["stats"]:
+            self.logger.warning(f"После агрегации поле silver_collected отсутствует, добавляем со значением 0")
+            aggregated["stats"]["silver_collected"] = 0
+        elif not isinstance(aggregated["stats"]["silver_collected"], (int, float)):
+            self.logger.warning(
+                f"Некорректный тип данных silver_collected: {type(aggregated['stats']['silver_collected'])}")
+            aggregated["stats"]["silver_collected"] = 0
 
         # Логируем агрегированные данные для отладки, особенно серебро
         self.logger.debug(f"Агрегация для периода {period}: {len(filtered_records)} записей")
         self.logger.debug(f"Агрегированная статистика: {aggregated['stats']}")
-        if "silver_collected" in aggregated["stats"]:
-            self.logger.debug(f"Серебро за период {period}: {aggregated['stats']['silver_collected']}")
+        self.logger.debug(f"Серебро за период {period}: {aggregated['stats']['silver_collected']}")
 
         # Calculate derived statistics
         stats = aggregated["stats"]

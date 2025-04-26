@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame,
     QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy,
-    QTabWidget, QPushButton
+    QTabWidget, QPushButton, QApplication
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 
 from gui.styles import Styles
@@ -18,6 +18,10 @@ class StatsWidget(QWidget):
     def __init__(self, bot_engine, parent=None):
         super().__init__(parent)
         self.bot_engine = bot_engine
+
+        # Добавляем логгер для отладки
+        import logging
+        self._py_logger = logging.getLogger("BotLogger")
 
         # Инициализация UI
         self.init_ui()
@@ -259,11 +263,6 @@ class StatsWidget(QWidget):
 
         daily_stats_layout.addLayout(top_layout)
 
-        # Описание таблицы
-        description_label = QLabel("Показатели за последние 7 дней с детализацией по дням")
-        description_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
-        daily_stats_layout.addWidget(description_label)
-
         # Таблица ежедневной статистики в рамке с заголовком
         daily_stats_frame = QFrame()
         daily_stats_frame.setObjectName("section_box")
@@ -328,9 +327,6 @@ class StatsWidget(QWidget):
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
         try:
-            import logging
-            logger = logging.getLogger("BotLogger")
-
             # Получаем текущий выбранный период
             period_index = self.period_combo.currentIndex()
             period_mapping = {
@@ -341,7 +337,7 @@ class StatsWidget(QWidget):
             }
             period = period_mapping.get(period_index, "all")
 
-            logger.info(f"Изменение периода статистики на: {period}")
+            self._py_logger.info(f"Изменение периода статистики на: {period}")
 
             # Очищаем кэш графиков для принудительного обновления
             if hasattr(self, 'battles_chart_widget'):
@@ -352,26 +348,46 @@ class StatsWidget(QWidget):
                 self.silver_chart_widget.clear_cache()
 
             # Обновляем все элементы статистики
-            self.refresh_statistics()
+            self.refresh_statistics(show_message=True)
 
-            logger.info(f"Статистика обновлена для периода: {period}")
+            self._py_logger.info(f"Статистика обновлена для периода: {period}")
         except Exception as e:
-            import logging
-            logger = logging.getLogger("BotLogger")
-            logger.error(f"Ошибка при обновлении периода статистики: {e}")
+            self._py_logger.error(f"Ошибка при обновлении периода статистики: {e}")
             import traceback
-            logger.error(traceback.format_exc())
+            self._py_logger.error(traceback.format_exc())
 
-    def refresh_statistics(self):
-        """Обновляет все отображения статистики."""
+    def refresh_statistics(self, show_message=True):
+        """
+        Обновляет все отображения статистики с принудительной загрузкой данных.
+
+        Args:
+            show_message (bool): Показывать ли сообщение об успешном обновлении
+        """
         # Проверяем, доступен ли stats_manager
         if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+            self._py_logger.warning("StatsManager недоступен, невозможно обновить статистику")
             return
 
         try:
-            import logging
-            logger = logging.getLogger("BotLogger")
-            logger.info("Обновление статистики запущено...")
+            # Отключаем кнопки обновления на время операции
+            self.refresh_stats_button.setEnabled(False)
+            if hasattr(self, 'refresh_daily_stats_button'):
+                self.refresh_daily_stats_button.setEnabled(False)
+
+            # Добавляем текст "Обновление..." на кнопки
+            original_text = self.refresh_stats_button.text()
+            self.refresh_stats_button.setText("⏳ Обновление...")
+            if hasattr(self, 'refresh_daily_stats_button'):
+                self.refresh_daily_stats_button.setText("⏳ Обновление...")
+
+            # Обновляем интерфейс, чтобы изменения стали видны
+            QApplication.processEvents()
+
+            self._py_logger.info("Обновление статистики запущено...")
+
+            # Принудительно загружаем свежие данные из файла
+            self.bot_engine.stats_manager.load_stats()
+            self._py_logger.debug("Данные загружены из файла")
 
             # Получаем выбранный период
             period_index = self.period_combo.currentIndex()
@@ -382,15 +398,15 @@ class StatsWidget(QWidget):
                 3: "all"
             }
             period = period_mapping.get(period_index, "all")
-            logger.debug(f"Выбранный период: {period}")
+            self._py_logger.debug(f"Выбранный период: {period}")
 
             # Получаем статистику для выбранного периода
             stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
-            logger.debug(f"Получены данные статистики: {stats_data}")
+            self._py_logger.debug(f"Получены данные статистики для периода {period}")
 
             # Обновляем карточки с основными показателями
             self.update_stats_cards(stats_data)
-            logger.debug("Карточки статистики обновлены")
+            self._py_logger.debug("Карточки статистики обновлены")
 
             # Очищаем кэш графиков для принудительного полного обновления
             if hasattr(self, 'battles_chart_widget'):
@@ -399,30 +415,114 @@ class StatsWidget(QWidget):
                 self.keys_chart_widget.clear_cache()
             if hasattr(self, 'silver_chart_widget'):
                 self.silver_chart_widget.clear_cache()
-            logger.debug("Кэш графиков очищен")
+            self._py_logger.debug("Кэш графиков очищен")
 
-            # Обновляем графики трендов
-            self.update_trend_charts()
-            logger.debug("Графики трендов обновлены")
+            # Обновляем графики трендов (принудительно)
+            self.update_trend_charts(force_update=True)
+            self._py_logger.debug("Графики трендов обновлены")
 
             # Обновляем таблицу ежедневной статистики
             self.update_daily_stats_table()
-            logger.debug("Таблица ежедневной статистики обновлена")
+            self._py_logger.debug("Таблица ежедневной статистики обновлена")
 
-            logger.info("Обновление статистики завершено успешно")
+            self._py_logger.info("Обновление статистики завершено успешно")
+
+            # Восстанавливаем текст и доступность кнопок
+            self.refresh_stats_button.setText(original_text)
+            self.refresh_stats_button.setEnabled(True)
+            if hasattr(self, 'refresh_daily_stats_button'):
+                self.refresh_daily_stats_button.setText(original_text)
+                self.refresh_daily_stats_button.setEnabled(True)
+
+            # Показываем сообщение об успешном обновлении
+            if show_message:
+                self.show_update_success_message()
 
         except Exception as e:
-            import logging
-            logger = logging.getLogger("BotLogger")
-            logger.error(f"Ошибка при обновлении статистики: {e}")
+            self._py_logger.error(f"Ошибка при обновлении статистики: {e}")
             import traceback
-            logger.error(traceback.format_exc())
+            self._py_logger.error(traceback.format_exc())
+
+            # Восстанавливаем текст и доступность кнопок в случае ошибки
+            self.refresh_stats_button.setText(original_text)
+            self.refresh_stats_button.setEnabled(True)
+            if hasattr(self, 'refresh_daily_stats_button'):
+                self.refresh_daily_stats_button.setText(original_text)
+                self.refresh_daily_stats_button.setEnabled(True)
+
+    def update_trend_charts(self, force_update=False):
+        """
+        Обновляет графики трендов с последними данными.
+
+        Args:
+            force_update (bool): Принудительное обновление графиков даже если данные не изменились
+        """
+        try:
+            # Проверяем, доступен ли stats_manager
+            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                self._py_logger.warning("StatsManager недоступен, невозможно обновить графики")
+                return
+
+            # Получаем данные трендов
+            trend_data = self.bot_engine.stats_manager.get_trend_data()
+            self._py_logger.debug(f"Получены данные трендов: {len(trend_data.get('dates', []))} дат")
+
+            # Проверяем, достаточно ли данных для отображения
+            if not trend_data or len(trend_data.get("dates", [])) < 1:
+                self._py_logger.warning("Недостаточно данных для отображения графиков")
+                # Недостаточно данных - очищаем графики
+                self.battles_chart_widget.clear()
+                self.keys_chart_widget.clear()
+                self.silver_chart_widget.clear()
+                return
+
+            # Принудительно обновляем графики без проверки на изменение данных
+            self._py_logger.debug("Обновление графиков")
+
+            # Сохраняем данные для отладки
+            if hasattr(self, '_last_chart_update'):
+                old_trend = self._last_chart_update
+                self._py_logger.debug(f"Старые данные трендов: {len(old_trend.get('dates', []))} дат")
+
+                # Проверка наличия данных о серебре
+                old_silver = old_trend.get('silver_collected', [])
+                new_silver = trend_data.get('silver_collected', [])
+                self._py_logger.debug(f"Серебро в старых данных: {old_silver}")
+                self._py_logger.debug(f"Серебро в новых данных: {new_silver}")
+
+            # Обновляем графики принудительно
+            self._last_chart_update = trend_data
+
+            # Обновляем каждый график отдельно для более надежной работы
+            try:
+                self.battles_chart_widget.update_chart(trend_data)
+                self._py_logger.debug("График боев обновлен")
+            except Exception as e:
+                self._py_logger.error(f"Ошибка при обновлении графика боев: {e}")
+
+            try:
+                self.keys_chart_widget.update_chart(trend_data)
+                self._py_logger.debug("График ключей обновлен")
+            except Exception as e:
+                self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
+
+            try:
+                self.silver_chart_widget.update_chart(trend_data)
+                self._py_logger.debug("График серебра обновлен")
+            except Exception as e:
+                self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
+            import traceback
+            self._py_logger.error(traceback.format_exc())
 
     def update_stats_cards(self, stats_data=None):
         """Обновляет карточки с основными показателями."""
         if stats_data is None:
             # Если данные не переданы, пытаемся получить их
             if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                self._py_logger.warning("StatsManager недоступен, невозможно обновить карточки статистики")
                 return
 
             # Получаем выбранный период
@@ -438,73 +538,73 @@ class StatsWidget(QWidget):
             stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
 
         # Логируем полученные данные для отладки
-        import logging
-        logger = logging.getLogger("BotLogger")
-        logger.debug(f"Обновление карточек статистики. Период: {stats_data.get('period', 'unknown')}")
-        logger.debug(f"Статистика: {stats_data.get('stats', {})}")
+        self._py_logger.debug(f"Обновление карточек статистики. Период: {stats_data.get('period', 'unknown')}")
+
+        # Проверяем наличие всех нужных данных
+        if "stats" not in stats_data:
+            self._py_logger.error("В данных статистики отсутствует ключ 'stats'")
+            return
+
+        # Безопасно получаем данные из статистики
+        victories = stats_data["stats"].get("victories", 0)
+        defeats = stats_data["stats"].get("defeats", 0)
+        keys_collected = stats_data["stats"].get("keys_collected", 0)
 
         # Обновляем карточки с основными показателями
-        total_battles = stats_data["stats"]["victories"] + stats_data["stats"]["defeats"]
+        total_battles = victories + defeats
         self.total_battles_card.set_value(str(total_battles))
 
         win_rate = stats_data.get("win_rate", 0)
         self.win_rate_card.set_value(f"{win_rate:.1f}%")
 
-        self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
+        self.total_keys_card.set_value(str(keys_collected))
 
-        # Форматируем значение серебра, убедившись что оно присутствует
-        silver_collected = stats_data["stats"].get("silver_collected", 0)
+        # Форматируем значение серебра с надежной обработкой
+        try:
+            # Безопасное получение данных о серебре
+            if "silver_collected" in stats_data["stats"]:
+                silver_collected = stats_data["stats"]["silver_collected"]
+                self._py_logger.debug(f"Серебро из данных: {silver_collected}")
+            else:
+                silver_collected = 0
+                self._py_logger.warning("Поле silver_collected отсутствует в данных статистики")
 
-        # Логируем, какое серебро получено
-        logger.debug(f"Серебро из данных: {silver_collected}")
+            # Дополнительное логирование для отладки
+            self._py_logger.debug(f"Тип данных серебра: {type(silver_collected)}")
 
-        silver_formatted = Styles.format_silver(silver_collected)
-        logger.debug(f"Отформатированное серебро: {silver_formatted}")
+            # Убедимся, что silver_collected является числом
+            if not isinstance(silver_collected, (int, float)):
+                self._py_logger.warning(f"Значение серебра имеет неверный тип: {type(silver_collected)}")
+                silver_collected = 0
 
-        self.total_silver_card.set_value(silver_formatted)
+            # Форматирование значения
+            silver_formatted = Styles.format_silver(silver_collected)
+            self._py_logger.debug(f"Отформатированное серебро: {silver_formatted}")
+
+            # Обновляем карточку
+            self.total_silver_card.set_value(silver_formatted)
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при форматировании серебра: {e}")
+            # Устанавливаем безопасное значение по умолчанию
+            self.total_silver_card.set_value("0K")
 
         # Отображаем общее время игры при наличии данных о продолжительности
         total_hours = stats_data.get("total_duration_hours", 0)
         if hasattr(self, 'total_time_card'):
             self.total_time_card.set_value(f"{total_hours:.1f} ч")
 
-    def update_trend_charts(self):
-        """Обновляет графики трендов с последними данными."""
-        try:
-            # Проверяем, доступен ли stats_manager
-            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-                return
-
-            # Получаем данные трендов
-            trend_data = self.bot_engine.stats_manager.get_trend_data()
-
-            # Проверяем, достаточно ли данных для отображения
-            if not trend_data or len(trend_data.get("dates", [])) <= 1:
-                # Недостаточно данных - очищаем графики
-                self.battles_chart_widget.clear()
-                self.keys_chart_widget.clear()
-                self.silver_chart_widget.clear()
-                return
-
-            # Обновляем графики (без частой перезагрузки кэша)
-            if not hasattr(self, '_last_chart_update') or trend_data != self._last_chart_update:
-                self._last_chart_update = trend_data
-                # Обновляем графики только если данные изменились
-                self.battles_chart_widget.update_chart(trend_data)
-                self.keys_chart_widget.update_chart(trend_data)
-                self.silver_chart_widget.update_chart(trend_data)
-
-        except Exception as e:
-            import logging
-            logging.error(f"Ошибка при обновлении графиков: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
-
     def update_daily_stats_table(self):
         """Обновляет таблицу ежедневной статистики."""
         try:
+            # Проверяем, доступен ли stats_manager
+            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                self._py_logger.warning("StatsManager недоступен, невозможно обновить таблицу статистики")
+                return
+
             # Получаем ежедневную статистику
             daily_stats = self.bot_engine.stats_manager.get_daily_stats(7)
+            self._py_logger.debug(f"Получены данные ежедневной статистики: {len(daily_stats)} дней")
 
             # Очищаем существующие строки
             self.daily_stats_table.setRowCount(0)
@@ -537,10 +637,14 @@ class StatsWidget(QWidget):
                 keys_per_victory = day.get("keys_per_victory", 0)
                 self.daily_stats_table.setItem(row, 6, QTableWidgetItem(f"{keys_per_victory:.1f}"))
 
-                # Собрано серебра - используем специальный метод для серебра
-                silver_collected = day["stats"].get("silver_collected", 0)
-                silver_formatted = Styles.format_silver(silver_collected)
-                self.daily_stats_table.setItem(row, 7, QTableWidgetItem(silver_formatted))
+                # Собрано серебра - с безопасной обработкой
+                try:
+                    silver_collected = day["stats"].get("silver_collected", 0)
+                    silver_formatted = Styles.format_silver(silver_collected)
+                    self.daily_stats_table.setItem(row, 7, QTableWidgetItem(silver_formatted))
+                except Exception as e:
+                    self._py_logger.error(f"Ошибка при форматировании серебра для таблицы: {e}")
+                    self.daily_stats_table.setItem(row, 7, QTableWidgetItem("0K"))
 
                 # Потери связи
                 self.daily_stats_table.setItem(row, 8, QTableWidgetItem(str(day["stats"]["connection_losses"])))
@@ -549,7 +653,33 @@ class StatsWidget(QWidget):
             self.daily_stats_table.customize_cell_colors()
 
         except Exception as e:
-            import logging
-            logging.error(f"Ошибка при обновлении таблицы ежедневной статистики: {e}")
+            self._py_logger.error(f"Ошибка при обновлении таблицы ежедневной статистики: {e}")
             import traceback
-            logging.error(traceback.format_exc())
+            self._py_logger.error(traceback.format_exc())
+
+    def show_update_success_message(self):
+        """Показывает временное сообщение об успешном обновлении."""
+        try:
+            from PyQt6.QtWidgets import QLabel
+            from PyQt6.QtCore import QTimer, Qt
+
+            # Создаем временную метку
+            success_label = QLabel("✓ Данные успешно обновлены", self)
+            success_label.setStyleSheet(f"""
+                background-color: {Styles.COLORS['secondary']};
+                color: {Styles.COLORS['background_dark']};
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            """)
+            success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            success_label.adjustSize()  # Подгоняем размер под текст
+
+            # Позиционируем метку в верхнем правом углу
+            success_label.move(self.width() - success_label.width() - 20, 20)
+            success_label.show()
+
+            # Удаляем метку через 3 секунды
+            QTimer.singleShot(3000, success_label.deleteLater)
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при показе сообщения об успешном обновлении: {e}")

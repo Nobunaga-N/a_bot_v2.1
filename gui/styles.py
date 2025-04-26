@@ -485,47 +485,75 @@ class Styles:
             "debug": cls.COLORS["secondary"],
         }
 
-
     @classmethod
     def format_silver(cls, silver_value):
         """
         Форматирует значение серебра с учетом, что базовое значение уже в тысячах (K).
+        Метод улучшен для более надежной обработки различных входных данных.
 
         Args:
-            silver_value (float): Значение серебра в тысячах (K)
+            silver_value (float, int, str): Значение серебра в тысячах (K)
 
         Returns:
             str: Отформатированное значение с нужным суффиксом
         """
-        if silver_value is None or silver_value == 0:
-            return "0K"
+        try:
+            # Проверяем тип входного значения
+            if silver_value is None:
+                return "0K"
 
-        # Серебро уже в тысячах, поэтому:
-        if silver_value < 1:  # Очень маленькие значения (менее 1K)
-            return f"{silver_value:.1f}K".replace('.0K', 'K')
-        elif silver_value < 1000:  # От 1K до 999K - остаемся в K
-            if silver_value == int(silver_value):
-                return f"{int(silver_value)}K"
-            else:
+            # Преобразуем строку в число при необходимости
+            if isinstance(silver_value, str):
+                try:
+                    # Удаляем суффиксы K, млн и т.д. если они уже есть
+                    clean_value = silver_value.lower().replace('k', '').replace('млн', '').replace('млрд', '').replace(
+                        'трлн', '').strip()
+                    silver_value = float(clean_value)
+                except ValueError:
+                    # Если не удалось преобразовать строку в число, возвращаем 0K
+                    return "0K"
+
+            # Обрабатываем отрицательные значения
+            if silver_value < 0:
+                return "0K"
+
+            # Округляем очень маленькие значения до нуля
+            if abs(silver_value) < 0.01:
+                return "0K"
+
+            # Серебро уже в тысячах, поэтому:
+            if silver_value < 1:  # Очень маленькие значения (менее 1K)
                 return f"{silver_value:.1f}K".replace('.0K', 'K')
-        elif silver_value < 1000000:  # От 1000K до 999999K - переходим в млн
-            # Преобразуем из тысяч в миллионы
-            millions = silver_value / 1000
-            if millions == int(millions):
-                return f"{int(millions)}млн"
-            else:
-                return f"{millions:.1f}млн".replace('.0млн', 'млн')
-        elif silver_value < 1000000000:  # От 1000000K до 999999999K - переходим в млрд
-            # Преобразуем из тысяч в миллиарды
-            billions = silver_value / 1000000
-            if billions == int(billions):
-                return f"{int(billions)}млрд"
-            else:
-                return f"{billions:.1f}млрд".replace('.0млрд', 'млрд')
-        else:  # Свыше 1000000000K - переходим в трлн
-            # Преобразуем из тысяч в триллионы
-            trillions = silver_value / 1000000000
-            if trillions == int(trillions):
-                return f"{int(trillions)}трлн"
-            else:
-                return f"{trillions:.1f}трлн".replace('.0трлн', 'трлн')
+            elif silver_value < 1000:  # От 1K до 999K - остаемся в K
+                if silver_value == int(silver_value):
+                    return f"{int(silver_value)}K"
+                else:
+                    return f"{silver_value:.1f}K".replace('.0K', 'K')
+            elif silver_value < 1000000:  # От 1000K до 999999K - переходим в млн
+                # Преобразуем из тысяч в миллионы
+                millions = silver_value / 1000
+                if millions == int(millions):
+                    return f"{int(millions)}млн"
+                else:
+                    return f"{millions:.1f}млн".replace('.0млн', 'млн')
+            elif silver_value < 1000000000:  # От 1000000K до 999999999K - переходим в млрд
+                # Преобразуем из тысяч в миллиарды
+                billions = silver_value / 1000000
+                if billions == int(billions):
+                    return f"{int(billions)}млрд"
+                else:
+                    return f"{billions:.1f}млрд".replace('.0млрд', 'млрд')
+            else:  # Свыше 1000000000K - переходим в трлн
+                # Преобразуем из тысяч в триллионы
+                trillions = silver_value / 1000000000
+                if trillions == int(trillions):
+                    return f"{int(trillions)}трлн"
+                else:
+                    return f"{trillions:.1f}трлн".replace('.0трлн', 'трлн')
+
+        except Exception as e:
+            # В случае любой ошибки возвращаем безопасное значение
+            import logging
+            logger = logging.getLogger("BotLogger")
+            logger.error(f"Ошибка форматирования серебра {silver_value}: {e}")
+            return "0K"
