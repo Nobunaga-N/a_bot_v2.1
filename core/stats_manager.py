@@ -430,7 +430,7 @@ class StatsManager:
                     "connection_losses": 0,
                     "errors": 0,
                     "keys_collected": 0,
-                    "silver_collected": 0
+                    "silver_collected": 0  # Убедимся, что это поле всегда присутствует
                 }
         else:
             aggregated["stats"] = {
@@ -440,7 +440,7 @@ class StatsManager:
                 "connection_losses": 0,
                 "errors": 0,
                 "keys_collected": 0,
-                "silver_collected": 0
+                "silver_collected": 0  # Убедимся, что это поле всегда присутствует
             }
 
         # Add up stats from filtered records
@@ -452,6 +452,12 @@ class StatsManager:
                 for key, value in record["stats"].items():
                     if key in aggregated["stats"]:
                         aggregated["stats"][key] += value
+
+        # Логируем агрегированные данные для отладки, особенно серебро
+        self.logger.debug(f"Агрегация для периода {period}: {len(filtered_records)} записей")
+        self.logger.debug(f"Агрегированная статистика: {aggregated['stats']}")
+        if "silver_collected" in aggregated["stats"]:
+            self.logger.debug(f"Серебро за период {period}: {aggregated['stats']['silver_collected']}")
 
         # Calculate derived statistics
         stats = aggregated["stats"]

@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame,
     QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy,
-    QTabWidget
+    QTabWidget, QPushButton
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
@@ -103,6 +103,20 @@ class StatsWidget(QWidget):
         overview_layout = QVBoxLayout(self.overview_tab)
         overview_layout.setContentsMargins(0, 10, 0, 0)
         overview_layout.setSpacing(20)
+
+        # Добавляем кнопку обновления статистики
+        refresh_button_layout = QHBoxLayout()
+        refresh_button_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self.refresh_stats_button = QPushButton("🔄 Обновить статистику")
+        self.refresh_stats_button.setObjectName("primary")
+        self.refresh_stats_button.setFixedWidth(200)
+        self.refresh_stats_button.setMinimumHeight(30)
+        self.refresh_stats_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_stats_button.clicked.connect(self.refresh_statistics)
+        refresh_button_layout.addWidget(self.refresh_stats_button)
+
+        overview_layout.addLayout(refresh_button_layout)
 
         # Создаем область прокрутки для содержимого
         scroll_area = QScrollArea()
@@ -224,6 +238,27 @@ class StatsWidget(QWidget):
         daily_stats_layout.setContentsMargins(0, 10, 0, 0)
         daily_stats_layout.setSpacing(15)
 
+        # Создаем блок с кнопкой и описанием
+        top_layout = QHBoxLayout()
+
+        # Описание таблицы
+        description_label = QLabel("Показатели за последние 7 дней с детализацией по дням")
+        description_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
+        top_layout.addWidget(description_label)
+
+        top_layout.addStretch(1)
+
+        # Кнопка обновления статистики
+        self.refresh_daily_stats_button = QPushButton("🔄 Обновить статистику")
+        self.refresh_daily_stats_button.setObjectName("primary")
+        self.refresh_daily_stats_button.setFixedWidth(200)
+        self.refresh_daily_stats_button.setMinimumHeight(30)
+        self.refresh_daily_stats_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_daily_stats_button.clicked.connect(self.refresh_statistics)
+        top_layout.addWidget(self.refresh_daily_stats_button)
+
+        daily_stats_layout.addLayout(top_layout)
+
         # Описание таблицы
         description_label = QLabel("Показатели за последние 7 дней с детализацией по дням")
         description_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
@@ -292,16 +327,11 @@ class StatsWidget(QWidget):
 
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
-        self.refresh_statistics()
-
-    def refresh_statistics(self):
-        """Обновляет все отображения статистики."""
-        # Проверяем, доступен ли stats_manager
-        if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-            return
-
         try:
-            # Получаем выбранный период
+            import logging
+            logger = logging.getLogger("BotLogger")
+
+            # Получаем текущий выбранный период
             period_index = self.period_combo.currentIndex()
             period_mapping = {
                 0: "day",
@@ -311,23 +341,82 @@ class StatsWidget(QWidget):
             }
             period = period_mapping.get(period_index, "all")
 
+            logger.info(f"Изменение периода статистики на: {period}")
+
+            # Очищаем кэш графиков для принудительного обновления
+            if hasattr(self, 'battles_chart_widget'):
+                self.battles_chart_widget.clear_cache()
+            if hasattr(self, 'keys_chart_widget'):
+                self.keys_chart_widget.clear_cache()
+            if hasattr(self, 'silver_chart_widget'):
+                self.silver_chart_widget.clear_cache()
+
+            # Обновляем все элементы статистики
+            self.refresh_statistics()
+
+            logger.info(f"Статистика обновлена для периода: {period}")
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("BotLogger")
+            logger.error(f"Ошибка при обновлении периода статистики: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def refresh_statistics(self):
+        """Обновляет все отображения статистики."""
+        # Проверяем, доступен ли stats_manager
+        if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+            return
+
+        try:
+            import logging
+            logger = logging.getLogger("BotLogger")
+            logger.info("Обновление статистики запущено...")
+
+            # Получаем выбранный период
+            period_index = self.period_combo.currentIndex()
+            period_mapping = {
+                0: "day",
+                1: "week",
+                2: "month",
+                3: "all"
+            }
+            period = period_mapping.get(period_index, "all")
+            logger.debug(f"Выбранный период: {period}")
+
             # Получаем статистику для выбранного периода
             stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
+            logger.debug(f"Получены данные статистики: {stats_data}")
 
             # Обновляем карточки с основными показателями
             self.update_stats_cards(stats_data)
+            logger.debug("Карточки статистики обновлены")
+
+            # Очищаем кэш графиков для принудительного полного обновления
+            if hasattr(self, 'battles_chart_widget'):
+                self.battles_chart_widget.clear_cache()
+            if hasattr(self, 'keys_chart_widget'):
+                self.keys_chart_widget.clear_cache()
+            if hasattr(self, 'silver_chart_widget'):
+                self.silver_chart_widget.clear_cache()
+            logger.debug("Кэш графиков очищен")
 
             # Обновляем графики трендов
             self.update_trend_charts()
+            logger.debug("Графики трендов обновлены")
 
             # Обновляем таблицу ежедневной статистики
             self.update_daily_stats_table()
+            logger.debug("Таблица ежедневной статистики обновлена")
+
+            logger.info("Обновление статистики завершено успешно")
 
         except Exception as e:
             import logging
-            logging.error(f"Ошибка при обновлении статистики: {e}")
+            logger = logging.getLogger("BotLogger")
+            logger.error(f"Ошибка при обновлении статистики: {e}")
             import traceback
-            logging.error(traceback.format_exc())
+            logger.error(traceback.format_exc())
 
     def update_stats_cards(self, stats_data=None):
         """Обновляет карточки с основными показателями."""
@@ -348,6 +437,12 @@ class StatsWidget(QWidget):
 
             stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
 
+        # Логируем полученные данные для отладки
+        import logging
+        logger = logging.getLogger("BotLogger")
+        logger.debug(f"Обновление карточек статистики. Период: {stats_data.get('period', 'unknown')}")
+        logger.debug(f"Статистика: {stats_data.get('stats', {})}")
+
         # Обновляем карточки с основными показателями
         total_battles = stats_data["stats"]["victories"] + stats_data["stats"]["defeats"]
         self.total_battles_card.set_value(str(total_battles))
@@ -357,9 +452,15 @@ class StatsWidget(QWidget):
 
         self.total_keys_card.set_value(str(stats_data["stats"]["keys_collected"]))
 
-        # Форматируем значение серебра учитывая, что оно уже в K
+        # Форматируем значение серебра, убедившись что оно присутствует
         silver_collected = stats_data["stats"].get("silver_collected", 0)
+
+        # Логируем, какое серебро получено
+        logger.debug(f"Серебро из данных: {silver_collected}")
+
         silver_formatted = Styles.format_silver(silver_collected)
+        logger.debug(f"Отформатированное серебро: {silver_formatted}")
+
         self.total_silver_card.set_value(silver_formatted)
 
         # Отображаем общее время игры при наличии данных о продолжительности
