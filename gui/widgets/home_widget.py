@@ -78,8 +78,9 @@ class HomeWidget(QWidget):
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
 
-            # Активируем кнопку остановки (вдавленное состояние)
-            self.stop_button.setActive(True)
+            # Меняем цвета кнопок: запустить - серая, остановить - красная
+            self.start_button.setActive(True)  # Запустить становится серой
+            self.stop_button.setActive(False)  # Остановить становится красной
 
             self.start_time = time.time()
             self.update_runtime()
@@ -186,6 +187,9 @@ class HomeWidget(QWidget):
         self.stop_button.clicked.connect(self.stop_bot)
         self.button_group.addButton(self.stop_button)
         control_layout.addWidget(self.stop_button)
+
+        # Добавляем код для начальной настройки: кнопка остановки должна быть серой по умолчанию
+        self.stop_button.setActive(True)
 
         # Добавляем растягивающийся элемент для выравнивания кнопок по левому краю
         control_layout.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
@@ -336,8 +340,9 @@ class HomeWidget(QWidget):
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
 
-            # Активируем кнопку запуска (вдавленное состояние)
-            self.start_button.setActive(True)
+            # Меняем цвета кнопок: запустить - зеленая, остановить - серая
+            self.start_button.setActive(False)  # Запустить становится зеленой
+            self.stop_button.setActive(True)  # Остановить становится серой
 
             self.start_time = None
             self.update_runtime()
