@@ -1,17 +1,17 @@
 from PyQt6.QtWidgets import QPushButton, QButtonGroup
-from PyQt6.QtCore import Qt, QTimer, QRect, QPropertyAnimation, QEasingCurve, pyqtProperty
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient
+from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, QPropertyAnimation, QEasingCurve, pyqtProperty, QPoint
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient, QFont, QPainterPath
 
 
 class FancyButton(QPushButton):
     """
-    Объемная анимированная кнопка с эффектом переключения.
+    Стилизованная анимированная кнопка с эффектом тактильности.
 
     Особенности:
-    - Постоянная плавная анимация
+    - Постоянная плавная градиентная анимация
     - Эффект вдавливания при нажатии
-    - Режим "активации" для переключения между кнопками
-    - Эффект объема и тени
+    - Овальная форма с белой обводкой
+    - Смещение при наведении/нажатии
     """
 
     def __init__(self, text, parent=None, success=True):
@@ -27,13 +27,16 @@ class FancyButton(QPushButton):
 
         # Параметры анимации и состояния
         self.success = success
-        self.max_shadow_offset = 4
-        self._shadow_offset = self.max_shadow_offset
-        self._active = False  # Состояние активации (вдавленности)
+        self._active = False  # Состояние активации
         self.hover = False
         self.pressed = False
-        self.wave_position = 0  # Позиция анимации волны
-        self.group = None  # Группа кнопок для переключения
+
+        # Параметры смещения
+        self._offset = QPoint(4, 4)  # Начальное смещение кнопки
+        self._max_offset = QPoint(4, 4)  # Максимальное смещение
+
+        # Параметры анимации точек
+        self.dots_position = 0  # Позиция анимированных точек
 
         # Настройка шрифта и размеров
         font = self.font()
@@ -43,49 +46,48 @@ class FancyButton(QPushButton):
 
         # Определение цветов для разных типов кнопок
         if success:
-            # Зеленая кнопка для "Запустить"
-            self.bg_color = QColor("#42E189")  # Зеленый
-            self.highlight_color = QColor("#67E7A1")  # Светло-зеленый
-            self.shadow_color = QColor("#30C973")  # Темно-зеленый
-            self.glow_color = QColor(66, 225, 137, 80)  # Полупрозрачный зеленый для свечения
+            # Зеленая кнопка для "Start"
+            self.bg_color = QColor("#facc15")  # Желтый
+            self.shadow_color = QColor("#292524")  # Темно-серый
+            self.glow_color = QColor(250, 204, 21, 40)  # Полупрозрачный желтый
         else:
-            # Красная кнопка для "Остановить"
+            # Красная кнопка для "Stop"
             self.bg_color = QColor("#FF6B6C")  # Красный
             self.highlight_color = QColor("#FF8E8F")  # Светло-красный
-            self.shadow_color = QColor("#E63E3F")  # Темно-красный
-            self.glow_color = QColor(255, 107, 108, 80)  # Полупрозрачный красный для свечения
+            self.shadow_color = QColor("#292524")  # Темно-серый
+            self.glow_color = QColor(255, 107, 108, 40)  # Полупрозрачный красный
 
-        # Цвета рамки и текста (общие для обоих типов)
+        # Общие цвета
         self.border_color = QColor("#292524")  # Темно-серый
-        self.text_color = QColor("#292524")  # Темно-серый
         self.outline_color = QColor("#fafaf9")  # Почти белый
+        self.text_color = QColor("#292524")  # Темно-серый
 
         # Установка фиксированного размера
-        self.setFixedHeight(46)
-        self.setMinimumWidth(160)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(120)
 
         # Курсор в виде указательного пальца при наведении
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Создание анимации для эффекта вдавливания
-        self.press_animation = QPropertyAnimation(self, b"shadow_offset")
+        self.press_animation = QPropertyAnimation(self, b"offset")
         self.press_animation.setDuration(150)
         self.press_animation.setEasingCurve(QEasingCurve.Type.OutQuad)
 
         # Таймер для постоянной анимации
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_animation)
-        self.animation_timer.start(30)  # Обновление каждые 30мс для более плавной анимации
+        self.animation_timer.start(50)  # Обновление каждые 50мс для плавной анимации
 
-    # Свойство для анимации смещения тени
-    def get_shadow_offset(self):
-        return self._shadow_offset
+    # Свойство для анимации смещения кнопки
+    def get_offset(self):
+        return self._offset
 
-    def set_shadow_offset(self, value):
-        self._shadow_offset = value
+    def set_offset(self, offset):
+        self._offset = offset
         self.update()
 
-    shadow_offset = pyqtProperty(float, get_shadow_offset, set_shadow_offset)
+    offset = pyqtProperty(QPoint, get_offset, set_offset)
 
     # Свойство для состояния активации
     def isActive(self):
@@ -108,27 +110,27 @@ class FancyButton(QPushButton):
 
         if active:
             # Деактивируем другие кнопки в группе
-            if self.group:
-                for button in self.group.findChildren(FancyButton):
+            if hasattr(self, 'group') and self.group:
+                for button in self.group.buttons:
                     if button != self and button.isActive():
                         button.setActive(False)
 
             # Анимация "вдавливания"
-            self.press_animation.setStartValue(self._shadow_offset)
-            self.press_animation.setEndValue(0)
+            self.press_animation.setStartValue(self._offset)
+            self.press_animation.setEndValue(QPoint(0, 0))
             self.press_animation.start()
         else:
             # Анимация "выхода" из вдавленного состояния
-            self.press_animation.setStartValue(self._shadow_offset)
-            self.press_animation.setEndValue(self.max_shadow_offset)
+            self.press_animation.setStartValue(self._offset)
+            self.press_animation.setEndValue(self._max_offset)
             self.press_animation.start()
 
         self.update()
 
     def update_animation(self):
-        """Обновляет состояние анимации волны."""
-        # Продвигаем позицию волны для создания эффекта движения
-        self.wave_position = (self.wave_position + 1) % 100
+        """Обновляет состояние анимации точек."""
+        # Продвигаем позицию точек для создания эффекта движения
+        self.dots_position = (self.dots_position + 1) % 8
         self.update()  # Перерисовка кнопки
 
     def paintEvent(self, event):
@@ -140,83 +142,102 @@ class FancyButton(QPushButton):
         width = rect.width()
         height = rect.height()
 
-        # Расчет смещения (целое число для текущего отображения)
-        shadow_offset = int(self._shadow_offset)
+        # Получаем текущее смещение
+        offset_x = self._offset.x()
+        offset_y = self._offset.y()
 
-        # Внешняя рамка (черная)
-        painter.setPen(QPen(self.border_color, 2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        outer_border_rect = QRect(1, 1, width - 2, height - 2)
-        painter.drawRoundedRect(outer_border_rect, 20, 20)
+        # Создаем путь для скругленной прямоугольной формы (овал)
+        button_path = QPainterPath()
+        button_path.addRoundedRect(0, 0, width, height, height / 2, height / 2)
 
-        # Светлый контур
+        # Рисуем внешнюю тень (черная)
+        shadow_path = QPainterPath()
+        shadow_path.addRoundedRect(offset_x, offset_y, width - offset_x, height - offset_y,
+                                   (height - offset_y) / 2, (height - offset_y) / 2)
+
+        painter.setPen(QPen(self.shadow_color, 2))
+        painter.setBrush(self.shadow_color)
+        painter.drawPath(shadow_path)
+
+        # Рисуем белую обводку
+        stroke_path = QPainterPath()
+        stroke_path.addRoundedRect(offset_x, offset_y, width - offset_x, height - offset_y,
+                                   (height - offset_y) / 2, (height - offset_y) / 2)
+
         painter.setPen(QPen(self.outline_color, 2))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        light_outline_rect = QRect(4, 4, width - 8, height - 8)
-        painter.drawRoundedRect(light_outline_rect, 18, 18)
+        painter.drawPath(stroke_path)
 
-        # Тени (несколько слоев для создания объема)
-        for i in range(shadow_offset, 0, -1):
-            shadow_rect = QRect(i, i, width - i * 2, height - i * 2)
-            painter.setPen(QPen(self.border_color, 1))
-            painter.setBrush(QBrush(self.shadow_color))
-            painter.drawRoundedRect(shadow_rect, 19 - i, 19 - i)
+        # Рисуем фон кнопки
+        button_rect = QRect(int(offset_x + 2), int(offset_y + 2),
+                            int(width - offset_x - 4), int(height - offset_y - 4))
+        button_radius = (height - offset_y - 4) / 2
 
-        # Основной фон кнопки (с градиентом)
-        button_rect = QRect(shadow_offset, shadow_offset,
-                            width - shadow_offset * 2,
-                            height - shadow_offset * 2)
-
-        # Создаем градиент для основного фона
-        gradient = QLinearGradient(0, button_rect.top(), 0, button_rect.bottom())
-        gradient.setColorAt(0, self.highlight_color)
-        gradient.setColorAt(1, self.bg_color)
-
-        painter.setPen(QPen(self.border_color, 1.5))
-        painter.setBrush(gradient)
-        painter.drawRoundedRect(button_rect, 18, 18)
-
-        # Белая внутренняя граница для объема
-        painter.setPen(QPen(QColor(255, 255, 255, 90), 2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        inner_border = QRect(button_rect.x() + 2, button_rect.y() + 2,
-                             button_rect.width() - 4, button_rect.height() - 4)
-        painter.drawRoundedRect(inner_border, 16, 16)
-
-        # Анимированная волна/свечение
-        # Используем радиальный градиент, который перемещается внутри кнопки
-        x_position = (button_rect.width() * self.wave_position / 100) + button_rect.x()
-
-        glow = QRadialGradient(
-            x_position, button_rect.center().y(),
-            button_rect.width() * 0.6
+        # Создаем градиент для фона
+        gradient = QLinearGradient(
+            button_rect.x(), button_rect.y(),
+            button_rect.x() + button_rect.width(), button_rect.y() + button_rect.height()
         )
+        if self.success:
+            gradient.setColorAt(0, QColor("#facc15"))  # Желтый
+            gradient.setColorAt(1, QColor("#eab308"))  # Немного темнее
+        else:
+            gradient.setColorAt(0, QColor("#FF6B6C"))  # Красный
+            gradient.setColorAt(1, QColor("#e53e3f"))  # Темнее
 
-        # Настраиваем цвета градиента
-        glow.setColorAt(0, self.glow_color)
-        glow.setColorAt(0.8, QColor(255, 255, 255, 10))
-        glow.setColorAt(1, QColor(255, 255, 255, 0))
-
-        # Отрисовка свечения
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(glow)
+        painter.setBrush(gradient)
+        painter.drawRoundedRect(button_rect, button_radius, button_radius)
 
-        # Используем клип-маску для ограничения свечения границами кнопки
-        painter.setClipRect(button_rect)
-        painter.setOpacity(0.7)
-        painter.drawEllipse(
-            int(x_position - button_rect.width() * 0.6),
-            int(button_rect.center().y() - button_rect.width() * 0.6),
-            int(button_rect.width() * 1.2),
-            int(button_rect.width() * 1.2)
+        # Рисуем анимированные точки
+        if not self._active:  # Показываем точки только когда кнопка не нажата
+            painter.save()
+            painter.setClipRect(button_rect)
+
+            dot_size = 3
+            dot_spacing = 8
+            dot_offset = self.dots_position
+
+            for x in range(-dot_offset, button_rect.width() + dot_spacing, dot_spacing):
+                for y in range(dot_offset % dot_spacing, button_rect.height() + dot_spacing, dot_spacing):
+                    # Проверяем, находится ли точка внутри кнопки
+                    if (button_rect.x() <= x + button_rect.x() <= button_rect.right() and
+                            button_rect.y() <= y + button_rect.y() <= button_rect.bottom()):
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QColor(255, 255, 255, 60))  # Полупрозрачный белый
+                        painter.drawEllipse(int(button_rect.x() + x), int(button_rect.y() + y), dot_size, dot_size)
+
+            painter.restore()
+
+        # Добавляем эффект блика вверху
+        highlight_rect = QRect(int(button_rect.x()), int(button_rect.y()),
+                               int(button_rect.width()), int(button_rect.height() // 3))
+        highlight_gradient = QLinearGradient(
+            highlight_rect.x(), highlight_rect.y(),
+            highlight_rect.x(), highlight_rect.y() + highlight_rect.height()
         )
-        painter.setClipping(False)
-        painter.setOpacity(1.0)
+        highlight_gradient.setColorAt(0, QColor(255, 255, 255, 80))
+        highlight_gradient.setColorAt(1, QColor(255, 255, 255, 0))
 
-        # Отрисовка текста с тенью
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(highlight_gradient)
+
+        highlight_path = QPainterPath()
+        highlight_path.addRoundedRect(
+            highlight_rect.x(), highlight_rect.y(),
+            highlight_rect.width(), highlight_rect.height(),
+            button_radius, button_radius
+        )
+
+        # Обрезаем путь блика, чтобы он был только в верхней части
+        painter.setClipRect(highlight_rect)
+        painter.drawPath(highlight_path)
+        painter.setClipping(False)
+
+        # Отрисовка текста
         text_rect = button_rect
 
-        # Тень текста (эффект обводки)
+        # Тень текста
         shadow_offset = 1
         text_shadow_rect = text_rect.adjusted(shadow_offset, shadow_offset, 0, 0)
         painter.setPen(QColor(0, 0, 0, 60))
@@ -233,8 +254,8 @@ class FancyButton(QPushButton):
         # Запускаем анимацию только если кнопка не активна
         if not self._active:
             self.press_animation.stop()
-            self.press_animation.setStartValue(self._shadow_offset)
-            self.press_animation.setEndValue(self.max_shadow_offset * 0.5)
+            self.press_animation.setStartValue(self._offset)
+            self.press_animation.setEndValue(QPoint(2, 2))  # Наполовину смещаем при наведении
             self.press_animation.start()
 
         super().enterEvent(event)
@@ -247,8 +268,8 @@ class FancyButton(QPushButton):
         # Запускаем анимацию только если кнопка не активна
         if not self._active:
             self.press_animation.stop()
-            self.press_animation.setStartValue(self._shadow_offset)
-            self.press_animation.setEndValue(self.max_shadow_offset)
+            self.press_animation.setStartValue(self._offset)
+            self.press_animation.setEndValue(self._max_offset)
             self.press_animation.start()
 
         super().leaveEvent(event)
@@ -259,8 +280,8 @@ class FancyButton(QPushButton):
 
         # Запуск анимации "вдавливания" кнопки
         self.press_animation.stop()
-        self.press_animation.setStartValue(self._shadow_offset)
-        self.press_animation.setEndValue(0)
+        self.press_animation.setStartValue(self._offset)
+        self.press_animation.setEndValue(QPoint(0, 0))
         self.press_animation.start()
 
         super().mousePressEvent(event)
@@ -274,9 +295,9 @@ class FancyButton(QPushButton):
             self.setActive(True)
         elif not self._active:
             # Если кнопка не была активирована, восстанавливаем ее состояние
-            target_offset = self.max_shadow_offset * 0.5 if self.hover else self.max_shadow_offset
+            target_offset = QPoint(2, 2) if self.hover else self._max_offset
             self.press_animation.stop()
-            self.press_animation.setStartValue(self._shadow_offset)
+            self.press_animation.setStartValue(self._offset)
             self.press_animation.setEndValue(target_offset)
             self.press_animation.start()
 
