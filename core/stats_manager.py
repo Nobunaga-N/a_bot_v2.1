@@ -621,3 +621,213 @@ class StatsManager:
             "remaining": max(0, self.keys_target - self.keys_current),
             "percent": min(100, int((self.keys_current / self.keys_target) * 100)) if self.keys_target > 0 else 0
         }
+
+    def get_stats_by_period_with_current_session(self, period: str, current_session_stats: Dict[str, int]) -> Dict[
+        str, Any]:
+        """
+        Получает статистику за период, включая данные текущей сессии (не сохраненные).
+
+        Args:
+            period: Период ("day", "week", "month", "all")
+            current_session_stats: Статистика текущей сессии
+
+        Returns:
+            Словарь с агрегированной статистикой
+        """
+        # Получаем исторические данные
+        historical_stats = self.get_stats_by_period(period)
+
+        # Если нет данных текущей сессии, просто возвращаем исторические данные
+        if not current_session_stats:
+            return historical_stats
+
+        # Создаем глубокую копию исторических данных
+        import copy
+        result = copy.deepcopy(historical_stats)
+
+        # Добавляем данные текущей сессии к статистике периода
+        for key, value in current_session_stats.items():
+            if key in result["stats"]:
+                # Убедимся, что оба значения могут быть суммированы
+                if isinstance(value, (int, float)) and isinstance(result["stats"][key], (int, float)):
+                    result["stats"][key] += value
+                else:
+                    # Для несовместимых типов, логируем и пропускаем
+                    self.logger.warning(
+                        f"Несовместимые типы для ключа {key}: {type(value)} и {type(result['stats'][key])}")
+            else:
+                # Если ключа нет в исторических данных, добавляем его
+                result["stats"][key] = value
+
+        # Пересчитываем производные показатели
+        battles = result["stats"].get("victories", 0) + result["stats"].get("defeats", 0)
+
+        if battles > 0:
+            result["win_rate"] = (result["stats"].get("victories", 0) / battles) * 100
+        else:
+            result["win_rate"] = 0
+
+        if result["stats"].get("victories", 0) > 0:
+            result["keys_per_victory"] = result["stats"].get("keys_collected", 0) / result["stats"].get("victories", 0)
+        else:
+            result["keys_per_victory"] = 0
+
+        # Не пересчитываем показатели на час, так как данные о времени текущей сессии не переданы
+
+        return result
+
+    def get_trend_data_with_current_session(self, current_session_stats: Dict[str, int]) -> Dict[str, List]:
+        """
+        Получает данные для графиков трендов, включая текущую сессию.
+
+        Args:
+            current_session_stats: Статистика текущей сессии
+
+        Returns:
+            Словарь с данными для графиков
+        """
+        # Получаем базовые данные трендов
+        trend_data = self.get_trend_data()
+
+        # Если нет данных текущей сессии, просто возвращаем исторические тренды
+        if not current_session_stats:
+            return trend_data
+
+        # Проверяем, есть ли данные для сегодняшнего дня
+        import datetime
+        today = datetime.datetime.now().strftime("%d.%m")
+
+        if trend_data["dates"] and trend_data["dates"][-1] == today:
+            # Если данные на сегодня уже есть, добавляем к ним текущую сессию
+            index = len(trend_data["dates"]) - 1
+
+            # Обновляем данные побед
+            if "victories" in current_session_stats and index < len(trend_data["victories"]):
+                trend_data["victories"][index] += current_session_stats.get("victories", 0)
+
+            # Обновляем данные поражений
+            if "defeats" in current_session_stats and index < len(trend_data["defeats"]):
+                trend_data["defeats"][index] += current_session_stats.get("defeats", 0)
+
+            # Обновляем данные ключей
+            if "keys_collected" in current_session_stats and index < len(trend_data["keys_collected"]):
+                trend_data["keys_collected"][index] += current_session_stats.get("keys_collected", 0)
+
+            # Обновляем данные серебра
+            if "silver_collected" in current_session_stats and index < len(trend_data["silver_collected"]):
+                trend_data["silver_collected"][index] += current_session_stats.get("silver_collected", 0)
+
+            # Пересчитываем процент побед и ключей за победу
+            if index < len(trend_data["victories"]) and index < len(trend_data["defeats"]):
+                victories = trend_data["victories"][index]
+                defeats = trend_data["defeats"][index]
+                battles = victories + defeats
+
+                if battles > 0 and index < len(trend_data["win_rates"]):
+                    trend_data["win_rates"][index] = round((victories / battles) * 100, 1)
+
+                if victories > 0 and index < len(trend_data["keys_per_victory"]) and index < len(
+                        trend_data["keys_collected"]):
+                    trend_data["keys_per_victory"][index] = round(trend_data["keys_collected"][index] / victories, 1)
+        else:
+            # Если сегодняшнего дня нет в данных, добавляем новую запись
+            trend_data["dates"].append(today)
+            trend_data["victories"].append(current_session_stats.get("victories", 0))
+            trend_data["defeats"].append(current_session_stats.get("defeats", 0))
+            trend_data["keys_collected"].append(current_session_stats.get("keys_collected", 0))
+            trend_data["silver_collected"].append(current_session_stats.get("silver_collected", 0))
+
+            # Рассчитываем процент побед и ключей за победу
+            victories = current_session_stats.get("victories", 0)
+            defeats = current_session_stats.get("defeats", 0)
+            battles = victories + defeats
+
+            if battles > 0:
+                trend_data["win_rates"].append(round((victories / battles) * 100, 1))
+            else:
+                trend_data["win_rates"].append(0)
+
+            if victories > 0:
+                trend_data["keys_per_victory"].append(
+                    round(current_session_stats.get("keys_collected", 0) / victories, 1))
+            else:
+                trend_data["keys_per_victory"].append(0)
+
+        return trend_data
+
+    def get_daily_stats_with_current_session(self, days: int = 7, current_session_stats: Dict[str, int] = None) -> List[
+        Dict[str, Any]]:
+        """
+        Получает статистику по дням с учетом текущей сессии.
+
+        Args:
+            days: Количество дней
+            current_session_stats: Статистика текущей сессии
+
+        Returns:
+            Список словарей с ежедневной статистикой
+        """
+        # Получаем базовую статистику по дням
+        daily_stats = self.get_daily_stats(days)
+
+        # Если нет данных текущей сессии, просто возвращаем историческую статистику
+        if not current_session_stats:
+            return daily_stats
+
+        # Проверяем, есть ли данные за сегодня
+        import datetime
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_display = datetime.datetime.now().strftime("%d.%m")
+
+        for day in daily_stats:
+            if day["display_date"] == today_display:
+                # Добавляем статистику текущей сессии к сегодняшнему дню
+                for key, value in current_session_stats.items():
+                    if key in day["stats"]:
+                        day["stats"][key] += value
+
+                # Пересчитываем win_rate и keys_per_victory
+                battles = day["stats"]["victories"] + day["stats"]["defeats"]
+                if battles > 0:
+                    day["win_rate"] = (day["stats"]["victories"] / battles) * 100
+                else:
+                    day["win_rate"] = 0
+
+                if day["stats"]["victories"] > 0:
+                    day["keys_per_victory"] = day["stats"]["keys_collected"] / day["stats"]["victories"]
+                else:
+                    day["keys_per_victory"] = 0
+
+                return daily_stats
+
+        # Если нет данных за сегодня, создаем новую запись
+        today_stats = {
+            "date": today,
+            "display_date": today_display,
+            "stats": {
+                "battles_started": current_session_stats.get("battles_started", 0),
+                "victories": current_session_stats.get("victories", 0),
+                "defeats": current_session_stats.get("defeats", 0),
+                "connection_losses": current_session_stats.get("connection_losses", 0),
+                "errors": current_session_stats.get("errors", 0),
+                "keys_collected": current_session_stats.get("keys_collected", 0),
+                "silver_collected": current_session_stats.get("silver_collected", 0)
+            }
+        }
+
+        # Рассчитываем win_rate и keys_per_victory
+        battles = today_stats["stats"]["victories"] + today_stats["stats"]["defeats"]
+        if battles > 0:
+            today_stats["win_rate"] = (today_stats["stats"]["victories"] / battles) * 100
+        else:
+            today_stats["win_rate"] = 0
+
+        if today_stats["stats"]["victories"] > 0:
+            today_stats["keys_per_victory"] = today_stats["stats"]["keys_collected"] / today_stats["stats"]["victories"]
+        else:
+            today_stats["keys_per_victory"] = 0
+
+        # Добавляем сегодняшний день в начало списка (так как список в хронологическом порядке)
+        daily_stats.append(today_stats)
+
+        return daily_stats

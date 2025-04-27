@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QSizePolicy,
     QTabWidget, QPushButton, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
 from gui.styles import Styles
@@ -15,6 +15,9 @@ from gui.widgets.chart_widgets import BattlesChartWidget, KeysChartWidget, Silve
 class StatsWidget(QWidget):
     """Страница статистики и аналитики."""
 
+    # Сигнал для запроса полного обновления
+    request_refresh = pyqtSignal()
+
     def __init__(self, bot_engine, parent=None):
         super().__init__(parent)
         self.bot_engine = bot_engine
@@ -25,6 +28,11 @@ class StatsWidget(QWidget):
 
         # Инициализация UI
         self.init_ui()
+
+        # Подключаем таймер автоматического обновления
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.auto_refresh_statistics)
+        self.update_timer.start(3000)  # Обновление каждые 3 секунды
 
     def init_ui(self):
         """Инициализация интерфейса страницы статистики."""
@@ -120,6 +128,13 @@ class StatsWidget(QWidget):
         self.refresh_stats_button.clicked.connect(self.refresh_statistics)
         refresh_button_layout.addWidget(self.refresh_stats_button)
 
+        # Добавим чекбокс для автообновления
+        self.auto_refresh_checkbox = QCheckBox("Автоматическое обновление")
+        self.auto_refresh_checkbox.setChecked(True)
+        self.auto_refresh_checkbox.stateChanged.connect(self.toggle_auto_refresh)
+        refresh_button_layout.insertWidget(0, self.auto_refresh_checkbox)
+        refresh_button_layout.insertStretch(1)
+
         overview_layout.addLayout(refresh_button_layout)
 
         # Создаем область прокрутки для содержимого
@@ -165,7 +180,7 @@ class StatsWidget(QWidget):
         )
         stats_layout.addWidget(self.total_keys_card)
 
-        # Карточка с серебром (заменяем карточку со временем игры)
+        # Карточка с серебром
         self.total_silver_card = StatCard(
             "Всего серебра",
             "0K",
@@ -189,7 +204,7 @@ class StatsWidget(QWidget):
 
         # Создаем виджеты графиков
         self.battles_chart_widget = BattlesChartWidget()
-        self.silver_chart_widget = SilverChartWidget()  # Заменяем график ключей на график серебра
+        self.silver_chart_widget = SilverChartWidget()
 
         # Добавляем виджеты графиков в лейаут
         battles_chart_frame = QFrame()
@@ -324,6 +339,39 @@ class StatsWidget(QWidget):
 
         daily_stats_layout.addWidget(legend_frame)
 
+        # Индикатор автообновления
+        self.auto_refresh_indicator = QLabel("Статистика обновляется автоматически")
+        self.auto_refresh_indicator.setStyleSheet(f"""
+            color: {Styles.COLORS['secondary']};
+            font-style: italic;
+            padding: 5px;
+        """)
+        self.auto_refresh_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        daily_stats_layout.addWidget(self.auto_refresh_indicator)
+
+    def toggle_auto_refresh(self, state):
+        """Включает/выключает автоматическое обновление статистики."""
+        if state:
+            self.update_timer.start(3000)
+            self.auto_refresh_indicator.setText("Статистика обновляется автоматически")
+            self.auto_refresh_indicator.setStyleSheet(
+                f"color: {Styles.COLORS['secondary']}; font-style: italic; padding: 5px;")
+        else:
+            self.update_timer.stop()
+            self.auto_refresh_indicator.setText("Автообновление отключено. Используйте кнопку обновления")
+            self.auto_refresh_indicator.setStyleSheet(
+                f"color: {Styles.COLORS['accent']}; font-style: italic; padding: 5px;")
+
+    def auto_refresh_statistics(self):
+        """Автоматически обновляет статистику с текущей сессией."""
+        # Проверяем, запущен ли бот
+        if not self.bot_engine.running.is_set():
+            # Если бот не запущен, неважно обновлять статистику
+            return
+
+        # Обновляем статистику без сообщений и визуальных эффектов
+        self.refresh_statistics(show_message=False, loading_animation=False)
+
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
         try:
@@ -356,12 +404,13 @@ class StatsWidget(QWidget):
             import traceback
             self._py_logger.error(traceback.format_exc())
 
-    def refresh_statistics(self, show_message=True):
+    def refresh_statistics(self, show_message=True, loading_animation=True):
         """
-        Обновляет все отображения статистики с принудительной загрузкой данных.
+        Обновляет все отображения статистики с учетом текущей сессии.
 
         Args:
             show_message (bool): Показывать ли сообщение об успешном обновлении
+            loading_animation (bool): Показывать ли анимацию загрузки
         """
         # Проверяем, доступен ли stats_manager
         if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
@@ -369,25 +418,30 @@ class StatsWidget(QWidget):
             return
 
         try:
-            # Отключаем кнопки обновления на время операции
-            self.refresh_stats_button.setEnabled(False)
-            if hasattr(self, 'refresh_daily_stats_button'):
-                self.refresh_daily_stats_button.setEnabled(False)
+            if loading_animation:
+                # Отключаем кнопки обновления на время операции
+                self.refresh_stats_button.setEnabled(False)
+                if hasattr(self, 'refresh_daily_stats_button'):
+                    self.refresh_daily_stats_button.setEnabled(False)
 
-            # Добавляем текст "Обновление..." на кнопки
-            original_text = self.refresh_stats_button.text()
-            self.refresh_stats_button.setText("⏳ Обновление...")
-            if hasattr(self, 'refresh_daily_stats_button'):
-                self.refresh_daily_stats_button.setText("⏳ Обновление...")
+                # Добавляем текст "Обновление..." на кнопки
+                original_text = self.refresh_stats_button.text()
+                self.refresh_stats_button.setText("⏳ Обновление...")
+                if hasattr(self, 'refresh_daily_stats_button'):
+                    self.refresh_daily_stats_button.setText("⏳ Обновление...")
 
-            # Обновляем интерфейс, чтобы изменения стали видны
-            QApplication.processEvents()
+                # Обновляем интерфейс, чтобы изменения стали видны
+                QApplication.processEvents()
 
-            self._py_logger.info("Обновление статистики запущено...")
+            # Логируем начало обновления
+            if show_message:
+                self._py_logger.info("Обновление статистики запущено...")
 
             # Принудительно загружаем свежие данные из файла
             self.bot_engine.stats_manager.load_stats()
-            self._py_logger.debug("Данные загружены из файла")
+
+            # Получаем статистику текущей сессии
+            current_session_stats = self.bot_engine.stats
 
             # Получаем выбранный период
             period_index = self.period_combo.currentIndex()
@@ -398,74 +452,84 @@ class StatsWidget(QWidget):
                 3: "all"
             }
             period = period_mapping.get(period_index, "all")
-            self._py_logger.debug(f"Выбранный период: {period}")
 
-            # Получаем статистику для выбранного периода
-            stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
-            self._py_logger.debug(f"Получены данные статистики для периода {period}")
+            # Получаем статистику для выбранного периода, включая текущую сессию
+            stats_data = self.bot_engine.stats_manager.get_stats_by_period_with_current_session(
+                period, current_session_stats
+            )
 
             # Обновляем карточки с основными показателями
             self.update_stats_cards(stats_data)
-            self._py_logger.debug("Карточки статистики обновлены")
 
-            # Очищаем кэш графиков для принудительного полного обновления
-            if hasattr(self, 'battles_chart_widget'):
-                self.battles_chart_widget.clear_cache()
-            if hasattr(self, 'keys_chart_widget'):
-                self.keys_chart_widget.clear_cache()
-            if hasattr(self, 'silver_chart_widget'):
-                self.silver_chart_widget.clear_cache()
-            self._py_logger.debug("Кэш графиков очищен")
+            # Получаем данные трендов с учетом текущей сессии
+            trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
+                current_session_stats
+            )
 
-            # Обновляем графики трендов (принудительно)
-            self.update_trend_charts(force_update=True)
-            self._py_logger.debug("Графики трендов обновлены")
+            # Обновляем графики трендов
+            self.update_trend_charts(trend_data)
+
+            # Получаем ежедневную статистику с учетом текущей сессии
+            daily_stats = self.bot_engine.stats_manager.get_daily_stats_with_current_session(
+                7, current_session_stats
+            )
 
             # Обновляем таблицу ежедневной статистики
-            self.update_daily_stats_table()
-            self._py_logger.debug("Таблица ежедневной статистики обновлена")
+            self.update_daily_stats_table(daily_stats)
 
-            self._py_logger.info("Обновление статистики завершено успешно")
+            if show_message:
+                self._py_logger.info("Обновление статистики завершено успешно")
 
-            # Восстанавливаем текст и доступность кнопок
-            self.refresh_stats_button.setText(original_text)
-            self.refresh_stats_button.setEnabled(True)
-            if hasattr(self, 'refresh_daily_stats_button'):
-                self.refresh_daily_stats_button.setText(original_text)
-                self.refresh_daily_stats_button.setEnabled(True)
+            if loading_animation:
+                # Восстанавливаем текст и доступность кнопок
+                self.refresh_stats_button.setText(original_text)
+                self.refresh_stats_button.setEnabled(True)
+                if hasattr(self, 'refresh_daily_stats_button'):
+                    self.refresh_daily_stats_button.setText(original_text)
+                    self.refresh_daily_stats_button.setEnabled(True)
 
             # Показываем сообщение об успешном обновлении
             if show_message:
                 self.show_update_success_message()
+
+            # Отправляем сигнал о завершении обновления
+            if hasattr(self, 'request_refresh'):
+                self.request_refresh.emit()
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении статистики: {e}")
             import traceback
             self._py_logger.error(traceback.format_exc())
 
-            # Восстанавливаем текст и доступность кнопок в случае ошибки
-            self.refresh_stats_button.setText(original_text)
-            self.refresh_stats_button.setEnabled(True)
-            if hasattr(self, 'refresh_daily_stats_button'):
-                self.refresh_daily_stats_button.setText(original_text)
-                self.refresh_daily_stats_button.setEnabled(True)
+            if loading_animation:
+                # Восстанавливаем текст и доступность кнопок в случае ошибки
+                self.refresh_stats_button.setText(
+                    original_text if 'original_text' in locals() else "🔄 Обновить статистику")
+                self.refresh_stats_button.setEnabled(True)
+                if hasattr(self, 'refresh_daily_stats_button'):
+                    self.refresh_daily_stats_button.setText(
+                        original_text if 'original_text' in locals() else "🔄 Обновить статистику")
+                    self.refresh_daily_stats_button.setEnabled(True)
 
-    def update_trend_charts(self, force_update=False):
+    def update_trend_charts(self, trend_data=None):
         """
         Обновляет графики трендов с последними данными.
 
         Args:
-            force_update (bool): Принудительное обновление графиков даже если данные не изменились
+            trend_data: Готовые данные для графиков (если None, будут загружены)
         """
         try:
-            # Проверяем, доступен ли stats_manager
-            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-                self._py_logger.warning("StatsManager недоступен, невозможно обновить графики")
-                return
+            # Если данные не переданы, получаем их
+            if trend_data is None:
+                # Проверяем, доступен ли stats_manager
+                if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                    self._py_logger.warning("StatsManager недоступен, невозможно обновить графики")
+                    return
 
-            # Получаем данные трендов
-            trend_data = self.bot_engine.stats_manager.get_trend_data()
-            self._py_logger.debug(f"Получены данные трендов: {len(trend_data.get('dates', []))} дат")
+                # Получаем данные трендов, включая текущую сессию
+                trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
+                    self.bot_engine.stats
+                )
 
             # Проверяем, достаточно ли данных для отображения
             if not trend_data or len(trend_data.get("dates", [])) < 1:
@@ -476,39 +540,19 @@ class StatsWidget(QWidget):
                 self.silver_chart_widget.clear()
                 return
 
-            # Принудительно обновляем графики без проверки на изменение данных
-            self._py_logger.debug("Обновление графиков")
-
-            # Сохраняем данные для отладки
-            if hasattr(self, '_last_chart_update'):
-                old_trend = self._last_chart_update
-                self._py_logger.debug(f"Старые данные трендов: {len(old_trend.get('dates', []))} дат")
-
-                # Проверка наличия данных о серебре
-                old_silver = old_trend.get('silver_collected', [])
-                new_silver = trend_data.get('silver_collected', [])
-                self._py_logger.debug(f"Серебро в старых данных: {old_silver}")
-                self._py_logger.debug(f"Серебро в новых данных: {new_silver}")
-
-            # Обновляем графики принудительно
-            self._last_chart_update = trend_data
-
             # Обновляем каждый график отдельно для более надежной работы
             try:
                 self.battles_chart_widget.update_chart(trend_data)
-                self._py_logger.debug("График боев обновлен")
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика боев: {e}")
 
             try:
                 self.keys_chart_widget.update_chart(trend_data)
-                self._py_logger.debug("График ключей обновлен")
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
 
             try:
                 self.silver_chart_widget.update_chart(trend_data)
-                self._py_logger.debug("График серебра обновлен")
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")
 
@@ -535,10 +579,10 @@ class StatsWidget(QWidget):
             }
             period = period_mapping.get(period_index, "all")
 
-            stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
-
-        # Логируем полученные данные для отладки
-        self._py_logger.debug(f"Обновление карточек статистики. Период: {stats_data.get('period', 'unknown')}")
+            # Получаем статистику с учетом текущей сессии
+            stats_data = self.bot_engine.stats_manager.get_stats_by_period_with_current_session(
+                period, self.bot_engine.stats
+            )
 
         # Проверяем наличие всех нужных данных
         if "stats" not in stats_data:
@@ -562,24 +606,10 @@ class StatsWidget(QWidget):
         # Форматируем значение серебра с надежной обработкой
         try:
             # Безопасное получение данных о серебре
-            if "silver_collected" in stats_data["stats"]:
-                silver_collected = stats_data["stats"]["silver_collected"]
-                self._py_logger.debug(f"Серебро из данных: {silver_collected}")
-            else:
-                silver_collected = 0
-                self._py_logger.warning("Поле silver_collected отсутствует в данных статистики")
-
-            # Дополнительное логирование для отладки
-            self._py_logger.debug(f"Тип данных серебра: {type(silver_collected)}")
-
-            # Убедимся, что silver_collected является числом
-            if not isinstance(silver_collected, (int, float)):
-                self._py_logger.warning(f"Значение серебра имеет неверный тип: {type(silver_collected)}")
-                silver_collected = 0
+            silver_collected = stats_data["stats"].get("silver_collected", 0)
 
             # Форматирование значения
             silver_formatted = Styles.format_silver(silver_collected)
-            self._py_logger.debug(f"Отформатированное серебро: {silver_formatted}")
 
             # Обновляем карточку
             self.total_silver_card.set_value(silver_formatted)
@@ -589,22 +619,25 @@ class StatsWidget(QWidget):
             # Устанавливаем безопасное значение по умолчанию
             self.total_silver_card.set_value("0K")
 
-        # Отображаем общее время игры при наличии данных о продолжительности
-        total_hours = stats_data.get("total_duration_hours", 0)
-        if hasattr(self, 'total_time_card'):
-            self.total_time_card.set_value(f"{total_hours:.1f} ч")
+    def update_daily_stats_table(self, daily_stats=None):
+        """
+        Обновляет таблицу ежедневной статистики.
 
-    def update_daily_stats_table(self):
-        """Обновляет таблицу ежедневной статистики."""
+        Args:
+            daily_stats: Готовые данные ежедневной статистики (если None, будут загружены)
+        """
         try:
-            # Проверяем, доступен ли stats_manager
-            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-                self._py_logger.warning("StatsManager недоступен, невозможно обновить таблицу статистики")
-                return
+            # Если данные не переданы, получаем их
+            if daily_stats is None:
+                # Проверяем, доступен ли stats_manager
+                if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                    self._py_logger.warning("StatsManager недоступен, невозможно обновить таблицу статистики")
+                    return
 
-            # Получаем ежедневную статистику
-            daily_stats = self.bot_engine.stats_manager.get_daily_stats(7)
-            self._py_logger.debug(f"Получены данные ежедневной статистики: {len(daily_stats)} дней")
+                # Получаем ежедневную статистику, включая текущую сессию
+                daily_stats = self.bot_engine.stats_manager.get_daily_stats_with_current_session(
+                    7, self.bot_engine.stats
+                )
 
             # Очищаем существующие строки
             self.daily_stats_table.setRowCount(0)
@@ -683,3 +716,20 @@ class StatsWidget(QWidget):
             QTimer.singleShot(3000, success_label.deleteLater)
         except Exception as e:
             self._py_logger.error(f"Ошибка при показе сообщения об успешном обновлении: {e}")
+
+    def showEvent(self, event):
+        """Обработчик события показа виджета."""
+        super().showEvent(event)
+        # При показе виджета запускаем таймер автообновления
+        if hasattr(self, 'update_timer') and self.auto_refresh_checkbox.isChecked():
+            self.update_timer.start(3000)
+
+    def hideEvent(self, event):
+        """Обработчик события скрытия виджета."""
+        super().hideEvent(event)
+        # При скрытии виджета останавливаем таймер для экономии ресурсов
+        if hasattr(self, 'update_timer'):
+            self.update_timer.stop()
+
+
+from PyQt6.QtWidgets import QCheckBox  # Нужен импорт для чекбокса

@@ -300,6 +300,18 @@ class MainWindow(QMainWindow):
             if not hasattr(self, '_last_charts_update') or (
                     current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
                 self._last_charts_update = current_time
+
+                # НОВЫЙ КОД: Принудительно обновляем статистику если бот работает
+                if self.bot_engine.running.is_set():
+                    # Принудительно обновляем статистику, используя новые методы с учетом текущей сессии
+                    # Используем метод refresh_statistics в StatsWidget, если он доступен
+                    if hasattr(self.stats_widget, 'refresh_statistics'):
+                        # Обновляем без визуальных эффектов и сообщений
+                        self.stats_widget.refresh_statistics(show_message=False, loading_animation=False)
+                        self._py_logger.debug("Автоматическое обновление статистики через StatsWidget")
+                        return
+
+                # Старый код как запасной вариант
                 # Принудительно обновляем графики только с указанным интервалом
                 self.stats_widget.update_trend_charts()
 
