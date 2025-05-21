@@ -90,6 +90,9 @@ class ResponsiveChartWidget(QWidget):
         # Флаг первой загрузки (для управления анимацией)
         self.first_load = True
 
+        # Флаг для отслеживания видимости виджета
+        self.is_visible = False
+
         # Переменная для хранения последних данных (для перерисовки при изменении размера)
         self.last_data = None
 
@@ -122,11 +125,27 @@ class ResponsiveChartWidget(QWidget):
                 # Сбрасываем флаг после окончания операции
                 self._is_currently_updating = False
 
+    def reset_animation_flag(self):
+        """Сбрасывает флаг первой загрузки для включения анимации при следующем обновлении."""
+        self.first_load = True
+        self._py_logger.debug("Флаг анимации сброшен, следующее обновление будет с анимацией")
+
+    def showEvent(self, event):
+        """Обработчик события показа виджета."""
+        super().showEvent(event)
+        self.is_visible = True
+        # При показе виджета включаем анимацию для следующего обновления
+        self.first_load = True
+
+    def hideEvent(self, event):
+        """Обработчик события скрытия виджета."""
+        super().hideEvent(event)
+        self.is_visible = False
+
     def update_chart(self, data):
         """Обновляет график новыми данными."""
-        # Проверяем наличие данных
+        # Пропускаем обновление, если данные не изменились или их нет
         if not data:
-            self._py_logger.warning("Не удалось обновить график: пустые данные")
             return
 
         # Сохраняем данные для возможной перерисовки
@@ -296,7 +315,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
                 const chartData = CHART_DATA_PLACEHOLDER;
 
                 // Настройки анимации
-                const ENABLE_ANIMATIONS = window.innerWidth > 600;
+                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
                 const ANIMATION_DURATION = 800;
 
                 // Объект для отслеживания состояния графика
@@ -709,7 +728,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
                         chartState.animation.isAnimating = true;
                         requestAnimationFrame(animateChart);
                     } else {
-                        // Если анимация отключена, рисуем график сразу полностью
+                        // Рисуем график сразу полностью без анимации
                         drawChart(1);
                     }
                 };
@@ -742,8 +761,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
             # Проверка данных
             if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
                 self._py_logger.warning("Пустой набор данных для графика побед")
-
-                # Создаем пустой набор данных для отображения сообщения
                 trend_data = {
                     "dates": [],
                     "victories": [],
@@ -757,23 +774,35 @@ class BattlesChartWidget(ResponsiveChartWidget):
             import json
             json_data = json.dumps(trend_data)
 
-            # Замена плейсхолдера данными
+            # Определяем, нужна ли анимация
+            enable_animation = self.first_load if hasattr(self, 'first_load') else True
+
+            # Замена плейсхолдеров данными
             updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
+            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
+
+            # После первого обновления отключаем анимацию для последующих
+            if hasattr(self, 'first_load'):
+                self.first_load = False
 
             # Запись обновленного HTML
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # НОВОЕ: Принудительная очистка кэша WebView
-            try:
-                self.web_view.page().profile().clearHttpCache()
-            except Exception as cache_error:
-                self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
+            # Принудительная очистка кэша WebView только при первой загрузке
+            if enable_animation:
+                try:
+                    self.web_view.page().profile().clearHttpCache()
+                except Exception as cache_error:
+                    self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
 
-            # Принудительная загрузка обновленного HTML в WebView
+            # Загрузка обновленного HTML в WebView
             from PyQt6.QtCore import QUrl
             self.web_view.load(QUrl.fromLocalFile(self.html_path))
-            self._py_logger.debug(f"График побед обновлен с {len(trend_data.get('dates', []))} точками данных")
+
+            animation_status = "с анимацией" if enable_animation else "без анимации"
+            self._py_logger.debug(
+                f"График побед обновлен {animation_status}, точек данных: {len(trend_data.get('dates', []))}")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика побед: {e}")
@@ -896,7 +925,7 @@ class KeysChartWidget(ResponsiveChartWidget):
                 const chartData = CHART_DATA_PLACEHOLDER;
 
                 // Настройки анимации
-                const ENABLE_ANIMATIONS = window.innerWidth > 600;
+                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
                 const ANIMATION_DURATION = 800;
 
                 // Объект для отслеживания состояния графика
@@ -1289,7 +1318,7 @@ class KeysChartWidget(ResponsiveChartWidget):
                         chartState.animation.isAnimating = true;
                         requestAnimationFrame(animateChart);
                     } else {
-                        // Если анимация отключена, рисуем график сразу полностью
+                        // Рисуем график сразу полностью без анимации
                         drawChart(1);
                     }
                 };
@@ -1322,8 +1351,6 @@ class KeysChartWidget(ResponsiveChartWidget):
             # Проверка данных
             if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
                 self._py_logger.warning("Пустой набор данных для графика ключей")
-
-                # Создаем пустой набор данных для отображения сообщения
                 trend_data = {
                     "dates": [],
                     "keys_collected": []
@@ -1336,23 +1363,35 @@ class KeysChartWidget(ResponsiveChartWidget):
             import json
             json_data = json.dumps(trend_data)
 
-            # Замена плейсхолдера данными
+            # Определяем, нужна ли анимация
+            enable_animation = self.first_load if hasattr(self, 'first_load') else True
+
+            # Замена плейсхолдеров данными
             updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
+            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
+
+            # После первого обновления отключаем анимацию для последующих
+            if hasattr(self, 'first_load'):
+                self.first_load = False
 
             # Запись обновленного HTML
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # НОВОЕ: Принудительная очистка кэша WebView
-            try:
-                self.web_view.page().profile().clearHttpCache()
-            except Exception as cache_error:
-                self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
+            # Принудительная очистка кэша WebView только при первой загрузке
+            if enable_animation:
+                try:
+                    self.web_view.page().profile().clearHttpCache()
+                except Exception as cache_error:
+                    self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
 
-            # Принудительная загрузка обновленного HTML в WebView
+            # Загрузка обновленного HTML в WebView
             from PyQt6.QtCore import QUrl
             self.web_view.load(QUrl.fromLocalFile(self.html_path))
-            self._py_logger.debug(f"График ключей обновлен с {len(trend_data.get('dates', []))} точками данных")
+
+            animation_status = "с анимацией" if enable_animation else "без анимации"
+            self._py_logger.debug(
+                f"График ключей обновлен {animation_status}, точек данных: {len(trend_data.get('dates', []))}")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
@@ -1474,7 +1513,7 @@ class SilverChartWidget(ResponsiveChartWidget):
                 const chartData = CHART_DATA_PLACEHOLDER;
 
                 // Настройки анимации
-                const ENABLE_ANIMATIONS = window.innerWidth > 600;
+                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
                 const ANIMATION_DURATION = 800;
 
                 // Объект для отслеживания состояния графика
@@ -1941,7 +1980,7 @@ class SilverChartWidget(ResponsiveChartWidget):
                         chartState.animation.isAnimating = true;
                         requestAnimationFrame(animateChart);
                     } else {
-                        // Если анимация отключена, рисуем график сразу полностью
+                        // Рисуем график сразу полностью без анимации
                         drawChart(1);
                     }
                 };
@@ -1976,8 +2015,6 @@ class SilverChartWidget(ResponsiveChartWidget):
             # Проверка данных
             if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
                 self._py_logger.warning("Пустой набор данных для графика серебра")
-
-                # Создаем пустой набор данных для отображения сообщения
                 trend_data = {
                     "dates": [],
                     "silver_collected": []
@@ -1990,23 +2027,35 @@ class SilverChartWidget(ResponsiveChartWidget):
             import json
             json_data = json.dumps(trend_data)
 
-            # Замена плейсхолдера данными
+            # Определяем, нужна ли анимация
+            enable_animation = self.first_load if hasattr(self, 'first_load') else True
+
+            # Замена плейсхолдеров данными
             updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
+            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
+
+            # После первого обновления отключаем анимацию для последующих
+            if hasattr(self, 'first_load'):
+                self.first_load = False
 
             # Запись обновленного HTML
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # НОВОЕ: Принудительная очистка кэша WebView
-            try:
-                self.web_view.page().profile().clearHttpCache()
-            except Exception as cache_error:
-                self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
+            # Принудительная очистка кэша WebView только при первой загрузке
+            if enable_animation:
+                try:
+                    self.web_view.page().profile().clearHttpCache()
+                except Exception as cache_error:
+                    self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
 
-            # Принудительная загрузка обновленного HTML в WebView
+            # Загрузка обновленного HTML в WebView
             from PyQt6.QtCore import QUrl
             self.web_view.load(QUrl.fromLocalFile(self.html_path))
-            self._py_logger.debug(f"График серебра обновлен с {len(trend_data.get('dates', []))} точками данных")
+
+            animation_status = "с анимацией" if enable_animation else "без анимации"
+            self._py_logger.debug(
+                f"График серебра обновлен {animation_status}, точек данных: {len(trend_data.get('dates', []))}")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")

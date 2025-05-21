@@ -779,11 +779,21 @@ class StatsWidget(QWidget):
             self._py_logger.error(f"Ошибка при показе сообщения об успешном обновлении: {e}")
 
     def showEvent(self, event):
-        """Обработчик события показа виджета."""
+        """Обработчик события показа виджета статистики."""
         super().showEvent(event)
-        # При показе виджета запускаем таймер автообновления
-        if hasattr(self, 'update_timer') and self.auto_refresh_checkbox.isChecked():
-            self.update_timer.start(3000)
+
+        # Сбрасываем флаги анимации для всех графиков при показе вкладки
+        try:
+            if hasattr(self, 'battles_chart_widget'):
+                self.battles_chart_widget.reset_animation_flag()
+            if hasattr(self, 'keys_chart_widget'):
+                self.keys_chart_widget.reset_animation_flag()
+            if hasattr(self, 'silver_chart_widget'):
+                self.silver_chart_widget.reset_animation_flag()
+
+            self._py_logger.debug("Флаги анимации графиков сброшены при показе вкладки статистики")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при сбросе флагов анимации: {e}")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""
