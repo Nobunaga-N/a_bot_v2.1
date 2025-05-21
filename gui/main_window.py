@@ -306,10 +306,43 @@ class MainWindow(QMainWindow):
                     # Обновляем без визуальных эффектов и сообщений
                     self.stats_widget.refresh_statistics(show_message=False, loading_animation=False)
                     self._py_logger.debug("Автоматическое обновление статистики через StatsWidget")
+
+                    # ДОБАВЛЕНО: Принудительно очищаем кэш графиков
+                    try:
+                        self.stats_widget.battles_chart_widget.clear_cache()
+                        self.stats_widget.keys_chart_widget.clear_cache()
+                        self.stats_widget.silver_chart_widget.clear_cache()
+                        self._py_logger.debug("Кэш графиков очищен")
+                    except Exception as e:
+                        self._py_logger.error(f"Ошибка при очистке кэша графиков: {e}")
+
+                    # ДОБАВЛЕНО: Принудительно обновляем графики свежими данными
+                    try:
+                        if hasattr(self.bot_engine, 'stats_manager'):
+                            # Получаем данные для графиков
+                            current_session_stats = None
+                            if not getattr(self.bot_engine, 'session_stats_registered', False):
+                                current_session_stats = self.bot_engine.stats
+                            trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
+                                current_session_stats)
+
+                            # Принудительно обновляем каждый график
+                            self.stats_widget.battles_chart_widget.update_chart(trend_data)
+                            self.stats_widget.keys_chart_widget.update_chart(trend_data)
+                            self.stats_widget.silver_chart_widget.update_chart(trend_data)
+
+                            self._py_logger.debug("Принудительное обновление графиков выполнено")
+                    except Exception as e:
+                        self._py_logger.error(f"Ошибка при принудительном обновлении графиков: {e}")
+
                     return
 
                 # Принудительно обновляем графики только с указанным интервалом
-                self.stats_widget.update_trend_charts()
+                try:
+                    self.stats_widget.update_trend_charts()
+                    self._py_logger.debug("Обновление графиков через update_trend_charts")
+                except Exception as e:
+                    self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
 
             # Если бот запущен, проверяем изменение статистики
             if self.bot_engine.running.is_set():

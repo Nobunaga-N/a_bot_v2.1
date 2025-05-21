@@ -577,10 +577,14 @@ class StatsWidget(QWidget):
                 self.battles_chart_widget.clear()
                 self.keys_chart_widget.clear()
                 self.silver_chart_widget.clear()
+                self.battles_chart_widget.clear_cache()
+                self.keys_chart_widget.clear_cache()
+                self.silver_chart_widget.clear_cache()
                 return
 
             # Обновляем каждый график отдельно для более надежной работы
             try:
+                self._py_logger.debug(f"Обновление графика боев: {len(trend_data['dates'])} точек данных")
                 self.battles_chart_widget.update_chart(trend_data)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика боев: {e}")

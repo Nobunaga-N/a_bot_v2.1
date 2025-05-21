@@ -124,12 +124,29 @@ class ResponsiveChartWidget(QWidget):
 
     def update_chart(self, data):
         """Обновляет график новыми данными."""
-        # Пропускаем обновление, если данные не изменились или их нет
-        if not data or (hasattr(self, 'last_data') and data == self.last_data):
+        # Проверяем наличие данных
+        if not data:
+            self._py_logger.warning("Не удалось обновить график: пустые данные")
             return
 
         # Сохраняем данные для возможной перерисовки
         self.last_data = data
+
+        self._py_logger.debug(f"Начинаем обновление графика с {len(data.get('dates', []))} точками данных")
+
+    def force_reload(self):
+        """Принудительно перезагружает график с последними данными."""
+        if not self.last_data:
+            self._py_logger.debug("Нет данных для принудительной перезагрузки графика")
+            return
+
+        # Очищаем кэш
+        self.clear_cache()
+
+        # Обновляем с последними сохраненными данными
+        self.update_chart(self.last_data)
+
+        self._py_logger.debug("Принудительная перезагрузка графика выполнена")
 
     def clear(self):
         """Очищает график."""
@@ -737,6 +754,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
             self.last_data = trend_data
 
             # Подготовка данных для JSON
+            import json
             json_data = json.dumps(trend_data)
 
             # Замена плейсхолдера данными
@@ -746,9 +764,16 @@ class BattlesChartWidget(ResponsiveChartWidget):
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # Загрузка обновленного HTML в WebView
+            # НОВОЕ: Принудительная очистка кэша WebView
+            try:
+                self.web_view.page().profile().clearHttpCache()
+            except Exception as cache_error:
+                self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
+
+            # Принудительная загрузка обновленного HTML в WebView
+            from PyQt6.QtCore import QUrl
             self.web_view.load(QUrl.fromLocalFile(self.html_path))
-            self._py_logger.debug("График побед обновлен")
+            self._py_logger.debug(f"График побед обновлен с {len(trend_data.get('dates', []))} точками данных")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика побед: {e}")
@@ -1308,6 +1333,7 @@ class KeysChartWidget(ResponsiveChartWidget):
             self.last_data = trend_data
 
             # Подготовка данных для JSON
+            import json
             json_data = json.dumps(trend_data)
 
             # Замена плейсхолдера данными
@@ -1317,9 +1343,16 @@ class KeysChartWidget(ResponsiveChartWidget):
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # Загрузка обновленного HTML в WebView
+            # НОВОЕ: Принудительная очистка кэша WebView
+            try:
+                self.web_view.page().profile().clearHttpCache()
+            except Exception as cache_error:
+                self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
+
+            # Принудительная загрузка обновленного HTML в WebView
+            from PyQt6.QtCore import QUrl
             self.web_view.load(QUrl.fromLocalFile(self.html_path))
-            self._py_logger.debug("График ключей обновлен")
+            self._py_logger.debug(f"График ключей обновлен с {len(trend_data.get('dates', []))} точками данных")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
@@ -1964,10 +1997,16 @@ class SilverChartWidget(ResponsiveChartWidget):
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # Загрузка обновленного HTML в WebView
+            # НОВОЕ: Принудительная очистка кэша WebView
+            try:
+                self.web_view.page().profile().clearHttpCache()
+            except Exception as cache_error:
+                self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
+
+            # Принудительная загрузка обновленного HTML в WebView
             from PyQt6.QtCore import QUrl
             self.web_view.load(QUrl.fromLocalFile(self.html_path))
-            self._py_logger.debug("График серебра обновлен")
+            self._py_logger.debug(f"График серебра обновлен с {len(trend_data.get('dates', []))} точками данных")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")
