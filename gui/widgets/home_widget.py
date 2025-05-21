@@ -391,8 +391,7 @@ class HomeWidget(QWidget):
         # Обновляем карточки
         self.battles_label.setText(str(stats.get("battles_started", 0)))
 
-        # Форматируем значение серебра для карточки с использованием нового метода
-        # Учитываем, что значение уже в тысячах (K)
+        # Форматируем значение серебра для карточки
         silver_value = stats.get("silver_collected", 0)
         silver_formatted = Styles.format_silver(silver_value)
         self.silver_card.set_value(silver_formatted)
@@ -409,12 +408,18 @@ class HomeWidget(QWidget):
             progress_info = self.bot_engine.stats_manager.get_keys_progress()
 
             # Проверяем, была ли статистика сессии уже зарегистрирована
-            if getattr(self.bot_engine, 'session_stats_registered', False):
+            is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
+
+            if is_registered:
                 # Статистика уже добавлена в общий прогресс, не добавляем снова
                 total_progress = progress_info["current"]
+                self._py_logger.debug(
+                    f"Прогресс-бар: сессия уже зарегистрирована, отображаем только общий прогресс {total_progress}")
             else:
                 # Статистика не была добавлена, добавляем ключи текущей сессии для отображения
                 total_progress = progress_info["current"] + stats.get("keys_collected", 0)
+                self._py_logger.debug(
+                    f"Прогресс-бар: добавляем ключи текущей сессии {stats.get('keys_collected', 0)} к общему прогрессу {progress_info['current']}")
 
             # Обновляем прогресс-бар
             self.keys_progress_bar.update_values(total_progress, target=progress_info["target"])

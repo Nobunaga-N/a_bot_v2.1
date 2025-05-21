@@ -303,29 +303,32 @@ class MainWindow(QMainWindow):
 
                 # НОВЫЙ КОД: Принудительно обновляем статистику если бот работает
                 if self.bot_engine.running.is_set():
-                    # Принудительно обновляем статистику, используя новые методы с учетом текущей сессии
-                    # Используем метод refresh_statistics в StatsWidget, если он доступен
-                    if hasattr(self.stats_widget, 'refresh_statistics'):
-                        # Обновляем без визуальных эффектов и сообщений
-                        self.stats_widget.refresh_statistics(show_message=False, loading_animation=False)
-                        self._py_logger.debug("Автоматическое обновление статистики через StatsWidget")
-                        return
+                    # Обновляем без визуальных эффектов и сообщений
+                    self.stats_widget.refresh_statistics(show_message=False, loading_animation=False)
+                    self._py_logger.debug("Автоматическое обновление статистики через StatsWidget")
+                    return
 
-                # Старый код как запасной вариант
                 # Принудительно обновляем графики только с указанным интервалом
                 self.stats_widget.update_trend_charts()
 
             # Если бот запущен, проверяем изменение статистики
             if self.bot_engine.running.is_set():
-                current_stats = self.bot_engine.stats
-                current_hash = hash(frozenset(current_stats.items()))
+                # Проверяем, была ли сессия уже зарегистрирована
+                is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
 
-                if str(current_hash) != self.last_stats_hash:
-                    self.last_stats_hash = str(current_hash)
-                    # Обновляем только табличные данные, но не перерисовываем графики
-                    self.stats_widget.update_stats_cards()
-                    self.stats_widget.update_daily_stats_table()
-                    self._py_logger.debug("Автоматическое обновление статистики выполнено (бот запущен)")
+                # Только если сессия не зарегистрирована, обновляем статистику с учетом текущей сессии
+                if not is_registered:
+                    current_stats = self.bot_engine.stats
+                    current_hash = hash(frozenset(current_stats.items()))
+
+                    if str(current_hash) != self.last_stats_hash:
+                        self.last_stats_hash = str(current_hash)
+                        # Обновляем только табличные данные, но не перерисовываем графики
+                        self.stats_widget.update_stats_cards()
+                        self.stats_widget.update_daily_stats_table()
+                        self._py_logger.debug("Автоматическое обновление статистики выполнено (бот запущен)")
+                else:
+                    self._py_logger.debug("Статистика сессии уже зарегистрирована, не обновляем текущие данные")
             else:
                 # Если бот не запущен, обновляем реже
                 if not hasattr(self, '_last_stats_update') or (
@@ -336,8 +339,7 @@ class MainWindow(QMainWindow):
                     self.stats_widget.update_daily_stats_table()
                     self._py_logger.debug("Автоматическое обновление статистики выполнено (бот остановлен)")
 
-        # ВАЖНОЕ ДОПОЛНЕНИЕ: Всегда обновляем прогресс-бар на главной странице, чтобы он отображал правильные значения
-        # Это необходимо, чтобы прогресс-бар обновлялся даже когда мы находимся на главной странице
+        # Обновление прогресс-бара на главной странице
         if self.stack.currentIndex() == self.page_indices.get("home", -1) and hasattr(self, 'home_widget'):
             # Обновляем раз в 5 секунд для экономии ресурсов
             if not hasattr(self, '_last_progress_update') or (
@@ -354,14 +356,18 @@ class MainWindow(QMainWindow):
                     if hasattr(self.bot_engine.stats_manager, 'keys_current'):
                         total_progress = self.bot_engine.stats_manager.keys_current
 
-                    # Добавляем ключи текущей сессии
-                    total_with_session = total_progress + self.bot_engine.stats.get("keys_collected", 0)
+                    # Добавляем ключи текущей сессии только если сессия не зарегистрирована
+                    is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
+                    total_with_session = total_progress
+                    if not is_registered:
+                        total_with_session += self.bot_engine.stats.get("keys_collected", 0)
 
                     # Если значения отличаются, обновляем
                     if current_display != total_with_session:
+                        # Обновляем прогресс-бар явно передавая флаг о регистрации сессии
                         self.home_widget.update_stats(self.bot_engine.stats)
                         self._py_logger.debug(
-                            f"Обновлен прогресс ключей: {total_with_session} (общий: {total_progress} + сессия: {self.bot_engine.stats.get('keys_collected', 0)})")
+                            f"Обновлен прогресс ключей: {total_with_session} (общий: {total_progress} + сессия: {0 if is_registered else self.bot_engine.stats.get('keys_collected', 0)})")
 
     def export_statistics(self):
         """Экспортирует статистику в CSV файл."""

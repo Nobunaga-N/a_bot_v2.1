@@ -369,7 +369,35 @@ class StatsWidget(QWidget):
             # Если бот не запущен, неважно обновлять статистику
             return
 
-        # Обновляем статистику без сообщений и визуальных эффектов
+        # Проверяем, не была ли сессия уже зарегистрирована
+        if getattr(self.bot_engine, 'session_stats_registered', False):
+            self._py_logger.debug("Сессия уже зарегистрирована, обновляем без добавления данных текущей сессии")
+
+            # Вместо вызова полного обновления с текущей сессией, загружаем только историческую статистику
+            try:
+                # Принудительно загружаем свежие данные из файла
+                self.bot_engine.stats_manager.load_stats()
+
+                # Обновляем элементы интерфейса только историческими данными без учета текущей сессии
+                period_index = self.period_combo.currentIndex()
+                period_mapping = {0: "day", 1: "week", 2: "month", 3: "all"}
+                period = period_mapping.get(period_index, "all")
+
+                # Получаем статистику без учета текущей сессии
+                stats_data = self.bot_engine.stats_manager.get_stats_by_period(period)
+                trend_data = self.bot_engine.stats_manager.get_trend_data()
+                daily_stats = self.bot_engine.stats_manager.get_daily_stats(7)
+
+                # Обновляем интерфейс
+                self.update_stats_cards(stats_data)
+                self.update_trend_charts(trend_data)
+                self.update_daily_stats_table(daily_stats)
+            except Exception as e:
+                self._py_logger.error(f"Ошибка при обновлении исторической статистики: {e}")
+
+            return
+
+        # Если сессия не зарегистрирована, обновляем с учетом текущей сессии
         self.refresh_statistics(show_message=False, loading_animation=False)
 
     def update_stats_period(self):
@@ -440,8 +468,14 @@ class StatsWidget(QWidget):
             # Принудительно загружаем свежие данные из файла
             self.bot_engine.stats_manager.load_stats()
 
-            # Получаем статистику текущей сессии
-            current_session_stats = self.bot_engine.stats
+            # Получаем статистику текущей сессии только если бот запущен и сессия не зарегистрирована
+            current_session_stats = None
+            if self.bot_engine.running.is_set() and not getattr(self.bot_engine, 'session_stats_registered', False):
+                current_session_stats = self.bot_engine.stats
+                self._py_logger.debug("Используем статистику текущей сессии для обновления")
+            else:
+                self._py_logger.debug(
+                    "Не используем статистику текущей сессии (бот остановлен или сессия уже зарегистрирована)")
 
             # Получаем выбранный период
             period_index = self.period_combo.currentIndex()
@@ -453,7 +487,7 @@ class StatsWidget(QWidget):
             }
             period = period_mapping.get(period_index, "all")
 
-            # Получаем статистику для выбранного периода, включая текущую сессию
+            # Получаем статистику для выбранного периода
             stats_data = self.bot_engine.stats_manager.get_stats_by_period_with_current_session(
                 period, current_session_stats
             )
@@ -461,7 +495,7 @@ class StatsWidget(QWidget):
             # Обновляем карточки с основными показателями
             self.update_stats_cards(stats_data)
 
-            # Получаем данные трендов с учетом текущей сессии
+            # Получаем данные трендов
             trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
                 current_session_stats
             )
@@ -469,7 +503,7 @@ class StatsWidget(QWidget):
             # Обновляем графики трендов
             self.update_trend_charts(trend_data)
 
-            # Получаем ежедневную статистику с учетом текущей сессии
+            # Получаем ежедневную статистику
             daily_stats = self.bot_engine.stats_manager.get_daily_stats_with_current_session(
                 7, current_session_stats
             )
@@ -526,9 +560,14 @@ class StatsWidget(QWidget):
                     self._py_logger.warning("StatsManager недоступен, невозможно обновить графики")
                     return
 
-                # Получаем данные трендов, включая текущую сессию
+                # Получаем статистику текущей сессии только если бот запущен и сессия не зарегистрирована
+                current_session_stats = None
+                if self.bot_engine.running.is_set() and not getattr(self.bot_engine, 'session_stats_registered', False):
+                    current_session_stats = self.bot_engine.stats
+
+                # Получаем данные трендов
                 trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
-                    self.bot_engine.stats
+                    current_session_stats
                 )
 
             # Проверяем, достаточно ли данных для отображения
