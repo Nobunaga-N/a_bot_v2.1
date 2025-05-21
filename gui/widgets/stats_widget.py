@@ -461,9 +461,9 @@ class StatsWidget(QWidget):
                 # Обновляем интерфейс, чтобы изменения стали видны
                 QApplication.processEvents()
 
-            # Логируем начало обновления
+            # Логируем начало обновления (изменено с INFO на DEBUG)
             if show_message:
-                self._py_logger.info("Обновление статистики запущено...")
+                self._py_logger.debug("Обновление статистики запущено...")
 
             # Принудительно загружаем свежие данные из файла
             self.bot_engine.stats_manager.load_stats()
@@ -512,7 +512,7 @@ class StatsWidget(QWidget):
             self.update_daily_stats_table(daily_stats)
 
             if show_message:
-                self._py_logger.info("Обновление статистики завершено успешно")
+                self._py_logger.debug("Обновление статистики завершено успешно")  # Изменено с INFO на DEBUG
 
             if loading_animation:
                 # Восстанавливаем текст и доступность кнопок

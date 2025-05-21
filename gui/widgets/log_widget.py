@@ -130,6 +130,7 @@ class LogWidget(QWidget):
         self.debug_checkbox = QCheckBox("DEBUG")
         self.debug_checkbox.setChecked(False)
         self.debug_checkbox.stateChanged.connect(self.apply_filter)
+        self.debug_checkbox.stateChanged.connect(self.toggle_debug) ###################################################
         top_controls.addWidget(self.debug_checkbox)
 
         # Чекбокс автопрокрутки
@@ -231,6 +232,40 @@ class LogWidget(QWidget):
                 # Прокручиваем вниз, если включена автопрокрутка
                 if self.auto_scroll:
                     self.log_viewer.moveCursor(QTextCursor.MoveOperation.End)
+
+    def toggle_debug(self, state):
+        """
+        Включает или отключает логирование сообщений уровня DEBUG.
+        Меняет глобальный уровень логирования при переключении галочки.
+
+        Args:
+            state: Состояние чекбокса (включен/выключен)
+        """
+        # Получаем корневой логгер приложения
+        import logging
+        logger = logging.getLogger("BotLogger")
+
+        if state:
+            # Включаем логи уровня DEBUG
+            logger.setLevel(logging.DEBUG)
+            # Устанавливаем уровень DEBUG для всех обработчиков
+            for handler in logger.handlers:
+                handler.setLevel(logging.DEBUG)
+
+            # Отладочное сообщение о включении режима DEBUG
+            logger.debug("Режим отладки активирован. Теперь будут отображаться сообщения DEBUG.")
+        else:
+            # Отключаем логи уровня DEBUG
+            logger.setLevel(logging.INFO)
+            # Устанавливаем уровень INFO для всех обработчиков
+            for handler in logger.handlers:
+                handler.setLevel(logging.INFO)
+
+            # Информационное сообщение о выключении режима DEBUG
+            logger.info("Режим отладки деактивирован. Сообщения DEBUG больше не будут отображаться.")
+
+        # Применяем фильтр к уже загруженным сообщениям
+        self.apply_filter()
 
     def _passes_filter(self, level):
         """Проверяет, проходит ли сообщение через текущий фильтр."""
