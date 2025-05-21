@@ -608,6 +608,15 @@ class StatsWidget(QWidget):
                 self._py_logger.warning("StatsManager недоступен, невозможно обновить карточки статистики")
                 return
 
+            # Получаем статистику текущей сессии только если бот запущен и сессия не зарегистрирована
+            current_session_stats = None
+            if self.bot_engine.running.is_set() and not getattr(self.bot_engine, 'session_stats_registered', False):
+                current_session_stats = self.bot_engine.stats
+                self._py_logger.debug("update_stats_cards: Используем статистику текущей сессии")
+            else:
+                self._py_logger.debug(
+                    "update_stats_cards: Не используем статистику текущей сессии (бот остановлен или сессия уже зарегистрирована)")
+
             # Получаем выбранный период
             period_index = self.period_combo.currentIndex()
             period_mapping = {
@@ -618,9 +627,9 @@ class StatsWidget(QWidget):
             }
             period = period_mapping.get(period_index, "all")
 
-            # Получаем статистику с учетом текущей сессии
+            # Получаем статистику с учетом текущей сессии (или без неё)
             stats_data = self.bot_engine.stats_manager.get_stats_by_period_with_current_session(
-                period, self.bot_engine.stats
+                period, current_session_stats
             )
 
         # Проверяем наличие всех нужных данных
@@ -673,9 +682,18 @@ class StatsWidget(QWidget):
                     self._py_logger.warning("StatsManager недоступен, невозможно обновить таблицу статистики")
                     return
 
-                # Получаем ежедневную статистику, включая текущую сессию
+                # Получаем статистику текущей сессии только если бот запущен и сессия не зарегистрирована
+                current_session_stats = None
+                if self.bot_engine.running.is_set() and not getattr(self.bot_engine, 'session_stats_registered', False):
+                    current_session_stats = self.bot_engine.stats
+                    self._py_logger.debug("update_daily_stats_table: Используем статистику текущей сессии")
+                else:
+                    self._py_logger.debug(
+                        "update_daily_stats_table: Не используем статистику текущей сессии (бот остановлен или сессия уже зарегистрирована)")
+
+                # Получаем ежедневную статистику, включая текущую сессию (или без неё)
                 daily_stats = self.bot_engine.stats_manager.get_daily_stats_with_current_session(
-                    7, self.bot_engine.stats
+                    7, current_session_stats
                 )
 
             # Очищаем существующие строки
