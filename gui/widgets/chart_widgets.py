@@ -250,8 +250,8 @@ class ResponsiveChartWidget(QWidget):
                 // Данные будут добавлены динамически
                 const chartData = CHART_DATA_PLACEHOLDER;
 
-                // Настройки анимации
-                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
+                // ИСПРАВЛЕНО: Убираем ограничение по размеру окна для анимации
+                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER;
                 const ANIMATION_DURATION = 800;
 
                 // Объект для отслеживания состояния графика
@@ -771,15 +771,32 @@ class ResponsiveChartWidget(QWidget):
                     window.addEventListener('resize', window._chartResizeHandler);
                 }}
 
-                window.onload = function() {{
+                // ИСПРАВЛЕНО: Улучшенная инициализация с проверкой готовности
+                function initializeChart() {{
+                    // Проверяем, что canvas готов
+                    const canvas = document.getElementById(CONFIG.chart_id);
+                    if (!canvas || canvas.clientWidth === 0 || canvas.clientHeight === 0) {{
+                        // Если canvas не готов, ждем еще немного
+                        setTimeout(initializeChart, 50);
+                        return;
+                    }}
+
                     setupEventListeners();
 
                     if (ENABLE_ANIMATIONS) {{
+                        // Сбрасываем состояние анимации
                         chartState.animation.isAnimating = true;
+                        chartState.animation.startTime = 0;
+                        chartState.animation.progress = 0;
                         requestAnimationFrame(animateChart);
                     }} else {{
                         drawChart(1);
                     }}
+                }}
+
+                window.onload = function() {{
+                    // Даем небольшую задержку для полной загрузки DOM
+                    setTimeout(initializeChart, 100);
                 }};
             </script>
         </body>
@@ -798,17 +815,26 @@ class ResponsiveChartWidget(QWidget):
     def resizeEvent(self, event):
         """Обработчик изменения размера виджета."""
         super().resizeEvent(event)
-        self.resize_timer.start(50)
+
+        # Останавливаем предыдущий таймер изменения размера
+        if hasattr(self, 'resize_timer'):
+            self.resize_timer.stop()
+
+        # Запускаем таймер с небольшой задержкой
+        if hasattr(self, 'resize_timer'):
+            self.resize_timer.start(150)  # Увеличиваем задержку для стабильности
 
     def handle_resize(self):
         """Обработка изменения размера с задержкой для оптимизации."""
         if hasattr(self, '_is_currently_updating') and self._is_currently_updating:
             return
 
-        if hasattr(self, 'last_data') and self.last_data:
+        if hasattr(self, 'last_data') and self.last_data and self.isVisible():
             self._is_currently_updating = True
             try:
+                # При изменении размера всегда без анимации
                 self.update_chart(self.last_data, force_no_animation=True)
+                self._py_logger.debug(f"График {self.title} обновлен после изменения размера")
             finally:
                 self._is_currently_updating = False
 
@@ -823,6 +849,11 @@ class ResponsiveChartWidget(QWidget):
 
             # УПРОЩЕННАЯ ЛОГИКА: анимация включается только когда force_no_animation=False
             enable_animation = not force_no_animation
+
+            # Дополнительная проверка: если виджет не видимый, отключаем анимацию
+            if enable_animation and not self.isVisible():
+                enable_animation = False
+                self._py_logger.debug(f"График {self.title}: виджет не видимый, анимация отключена")
 
             # Чтение базового HTML шаблона
             with open(self.html_path, 'r', encoding='utf-8') as f:
@@ -845,32 +876,63 @@ class ResponsiveChartWidget(QWidget):
             import time
             update_id = int(time.time() * 1000)  # Миллисекунды для уникальности
 
-            # Добавляем скрипт для принудительного обновления данных и обработчиков
+            # ИСПРАВЛЕНО: Улучшенный скрипт для принудительного обновления
             additional_script = f"""
             <script>
             // Уникальный ID обновления: {update_id}
             window.chartUpdateId = {update_id};
 
-            // Принудительно очищаем старые обработчики
+            // Принудительно очищаем старые обработчики и состояние
             window.addEventListener('load', function() {{
-                // Небольшая задержка для полной загрузки
+                // Убеждаемся, что старые обработчики удалены
+                const canvas = document.getElementById('{self.config["chart_id"]}');
+                if (canvas) {{
+                    // Удаляем всех слушателей событий
+                    const newCanvas = canvas.cloneNode(true);
+                    canvas.parentNode.replaceChild(newCanvas, canvas);
+                }}
+
+                // Небольшая задержка для полной загрузки и подготовки canvas
                 setTimeout(function() {{
-                    // Обновляем данные принудительно
-                    if (typeof chartData !== 'undefined' && typeof drawChart === 'function') {{
+                    // Проверяем готовность canvas
+                    const readyCanvas = document.getElementById('{self.config["chart_id"]}');
+                    if (readyCanvas && readyCanvas.clientWidth > 0 && readyCanvas.clientHeight > 0) {{
                         // Очищаем старое состояние
                         if (typeof chartState !== 'undefined') {{
                             chartState.bars = [];
                             chartState.hoveredBar = null;
+                            chartState.animation.isAnimating = false;
+                            chartState.animation.startTime = 0;
+                            chartState.animation.progress = 0;
                             if (chartState.tooltip) {{
                                 chartState.tooltip.style.display = 'none';
                             }}
                         }}
 
-                        // Перерисовываем график с новыми данными
-                        drawChart(1);
-
                         // Переустанавливаем обработчики событий
-                        setupEventListeners();
+                        if (typeof setupEventListeners === 'function') {{
+                            setupEventListeners();
+                        }}
+
+                        // Запускаем отрисовку с нужным типом анимации
+                        if (typeof drawChart === 'function') {{
+                            if ({str(enable_animation).lower()} && typeof animateChart === 'function') {{
+                                // Запускаем анимированную отрисовку
+                                if (typeof chartState !== 'undefined') {{
+                                    chartState.animation.isAnimating = true;
+                                    chartState.animation.startTime = 0;
+                                    requestAnimationFrame(animateChart);
+                                }}
+                            }} else {{
+                                // Обычная отрисовка без анимации
+                                drawChart(1);
+                            }}
+                        }}
+
+                        console.log('График {self.title} обновлен (ID: {update_id}, анимация: {enable_animation})');
+                    }} else {{
+                        // Если canvas еще не готов, пробуем еще раз через короткое время
+                        setTimeout(arguments.callee, 100);
                     }}
                 }}, 50);
             }});
@@ -900,6 +962,25 @@ class ResponsiveChartWidget(QWidget):
             self._py_logger.error(f"Ошибка при обновлении графика {self.title}: {e}")
             import traceback
             self._py_logger.debug(traceback.format_exc())
+
+    def showEvent(self, event):
+        """Обработчик события показа виджета графика."""
+        super().showEvent(event)
+
+        # Обновляем график при показе, если есть данные
+        if hasattr(self, 'last_data') and self.last_data:
+            # Даем небольшую задержку для стабилизации размеров
+            QTimer.singleShot(100, lambda: self._refresh_on_show())
+
+    def _refresh_on_show(self):
+        """Обновляет график при показе виджета."""
+        try:
+            if hasattr(self, 'last_data') and self.last_data:
+                # Обновляем без анимации при показе (размеры могли измениться)
+                self.update_chart(self.last_data, force_no_animation=True)
+                self._py_logger.debug(f"График {self.title} обновлен при показе виджета")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при обновлении графика {self.title} при показе: {e}")
 
     def clear(self):
         """Очищает график."""

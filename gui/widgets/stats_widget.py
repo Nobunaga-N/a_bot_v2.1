@@ -185,10 +185,15 @@ class ComponentUpdater:
             self._clear_all_charts()
             return
 
-        # Проверяем, изменились ли данные (если не принудительное обновление)
-        if not force_update and not self._has_chart_data_changed(trend_data):
+        # Проверяем, изменились ли данные (если не принудительное обновление и нет анимации)
+        if not force_update and not enable_animation and not self._has_chart_data_changed(trend_data):
             self._py_logger.debug("Данные графиков не изменились, обновление пропущено")
             return
+
+        # Логируем параметры обновления
+        animation_status = "с анимацией" if enable_animation else "без анимации"
+        update_reason = "принудительное" if force_update else "обычное"
+        self._py_logger.debug(f"Обновление графиков ({update_reason}) {animation_status}")
 
         # Обновляем все графики
         chart_configs = [
@@ -199,12 +204,21 @@ class ComponentUpdater:
 
         for chart_widget, chart_name in chart_configs:
             try:
+                # Проверяем видимость графика перед обновлением
+                if not chart_widget.isVisible():
+                    self._py_logger.debug(f"{chart_name} не видим, пропускаем обновление")
+                    continue
+
                 # ВАЖНО: передаем правильный параметр для управления анимацией
                 chart_widget.update_chart(trend_data, force_no_animation=not enable_animation)
-                animation_status = "с анимацией" if enable_animation else "без анимации"
+
                 self._py_logger.debug(f"Обновлен {chart_name} {animation_status}: {len(trend_data['dates'])} точек")
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении {chart_name}: {e}")
+
+        # Обновляем хеш данных, если обновление прошло успешно
+        if force_update or enable_animation:
+            self._has_chart_data_changed(trend_data)  # Обновляем хеш
 
     @handle_stats_errors()
     def update_daily_stats_table(self, daily_stats=None, force_reload=False):
@@ -472,9 +486,7 @@ class StatsWidget(QWidget):
     # НОВЫЙ МЕТОД: устанавливает флаг переключения вкладок
     def set_tab_switched(self, switched=True):
         """Устанавливает флаг переключения вкладок для включения анимации."""
-        self._tab_switched = switched
-        if switched:
-            self._py_logger.debug("Флаг переключения вкладки установлен - анимация будет включена")
+        pass  # Метод больше не используется
 
     def auto_refresh_statistics(self):
         """Автоматически обновляет статистику с текущей сессией."""
@@ -515,16 +527,13 @@ class StatsWidget(QWidget):
             if show_message:
                 self._py_logger.debug("Обновление статистики запущено...")
 
-            # Определяем, нужна ли анимация
-            should_animate = False
-            if enable_animation is not None:
-                # Если явно передан параметр, используем его
-                should_animate = enable_animation
-            elif self._tab_switched:
-                # Если установлен флаг переключения вкладок, включаем анимацию
-                should_animate = True
-                self._tab_switched = False  # Сбрасываем флаг после использования
-                self._py_logger.debug("Анимация включена из-за переключения вкладки")
+            # УПРОЩЕННАЯ ЛОГИКА: анимация включается только при явной передаче enable_animation=True
+            should_animate = enable_animation is True
+
+            if should_animate:
+                self._py_logger.debug("Анимация графиков включена (явно запрошена)")
+            else:
+                self._py_logger.debug("Анимация графиков отключена")
 
             # Обновляем все компоненты
             self.updater.update_stats_cards(force_reload=force_reload)
@@ -565,13 +574,35 @@ class StatsWidget(QWidget):
         """Обработчик события показа виджета статистики."""
         super().showEvent(event)
         self._is_currently_visible = True
-        self._py_logger.debug("Вкладка статистики показана")
+
+        # ДОБАВЛЕНО: Обеспечиваем видимость всех графиков при показе страницы
+        QTimer.singleShot(50, self._ensure_charts_visibility)
+
+        self._py_logger.debug("Страница статистики показана")
+
+    def _ensure_charts_visibility(self):
+        """Обеспечивает правильную видимость графиков."""
+        try:
+            # Убеждаемся что все графики видимы
+            charts = [
+                self.battles_chart_widget,
+                self.keys_chart_widget,
+                self.silver_chart_widget
+            ]
+
+            for chart in charts:
+                if chart and hasattr(chart, 'web_view'):
+                    chart.web_view.show()
+
+            self._py_logger.debug("Видимость графиков обеспечена")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при обеспечении видимости графиков: {e}")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""
         super().hideEvent(event)
         self._is_currently_visible = False
-        self._py_logger.debug("Вкладка статистики скрыта")
+        self._py_logger.debug("Страница статистики скрыта")
 
     # Убранные методы для совместимости (оставляем пустыми)
     def toggle_auto_refresh(self, state):

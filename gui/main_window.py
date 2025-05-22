@@ -468,15 +468,30 @@ class MainWindow(QMainWindow):
 
         # Специальная обработка для страницы статистики
         if page_id == "stats":
-            # ВАЖНО: устанавливаем флаг переключения вкладки для включения анимации
-            self.stats_widget.set_tab_switched(True)
+            # Помечаем виджет как видимый
+            if hasattr(self.stats_widget, '_is_currently_visible'):
+                self.stats_widget._is_currently_visible = True
 
-            # Обновляем статистику с анимацией при ручном переходе
-            QTimer.singleShot(100, lambda: self.stats_widget.refresh_statistics(enable_animation=True))
-            self._py_logger.debug("Переход на страницу статистики с анимацией")
+            # Даем время на отрисовку интерфейса, затем обновляем с анимацией
+            QTimer.singleShot(200, lambda: self._animate_stats_charts())
+            self._py_logger.debug("Переход на страницу статистики - анимация будет запущена")
+        else:
+            # Для других страниц помечаем статистику как невидимую
+            if hasattr(self.stats_widget, '_is_currently_visible'):
+                self.stats_widget._is_currently_visible = False
 
         # Настраиваем частоту обновлений
         self.timer_manager.adjust_update_frequency(page_id)
+
+    def _animate_stats_charts(self):
+        """Запускает анимацию графиков статистики при переключении на вкладку."""
+        try:
+            if hasattr(self, 'stats_widget') and self.stats_widget:
+                # Принудительно обновляем статистику с анимацией
+                self.stats_widget.refresh_statistics(enable_animation=True, force_reload=True)
+                self._py_logger.debug("Анимация графиков статистики запущена")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при запуске анимации графиков: {e}")
 
     def _setup_stats_animation(self):
         """Настраивает анимацию для страницы статистики."""
