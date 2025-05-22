@@ -466,12 +466,12 @@ class StatsWidget(QWidget):
         """Включает/выключает автоматическое обновление статистики."""
         if state:
             self.update_timer.start(3000)
-            self.auto_refresh_indicator.setText("Статистика обновляется автоматически")
+            self.auto_refresh_indicator.setText("Статистика обновляется автоматически без анимации графиков")
             self.auto_refresh_indicator.setStyleSheet(
                 f"color: {Styles.COLORS['secondary']}; font-style: italic; padding: 5px;")
         else:
             self.update_timer.stop()
-            self.auto_refresh_indicator.setText("Автообновление отключено. Используйте кнопку обновления")
+            self.auto_refresh_indicator.setText("Автообновление отключено. Используйте кнопку обновления для анимации")
             self.auto_refresh_indicator.setStyleSheet(
                 f"color: {Styles.COLORS['accent']}; font-style: italic; padding: 5px;")
 
@@ -485,13 +485,30 @@ class StatsWidget(QWidget):
             try:
                 self.data_provider.stats_manager.load_stats()
                 self.updater.update_stats_cards()
-                self.updater.update_trend_charts()
+                self.updater.update_trend_charts(allow_animation=False)  # Отключаем анимацию для автообновления
                 self.updater.update_daily_stats_table()
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении исторической статистики: {e}")
         else:
-            # Сессия не зарегистрирована - полное обновление
-            self.refresh_statistics(show_message=False, loading_animation=False)
+            # Сессия не зарегистрирована - автоматическое обновление БЕЗ анимации
+            self._refresh_statistics_without_animation()
+
+    def _refresh_statistics_without_animation(self):
+        """Обновляет статистику без анимации для автоматических обновлений."""
+        if not self.data_provider.stats_manager:
+            self._py_logger.warning("StatsManager недоступен")
+            return
+
+        try:
+            # Обновляем все компоненты без анимации
+            self.updater.update_stats_cards()
+            self.updater.update_trend_charts(allow_animation=False)  # Явно отключаем анимацию
+            self.updater.update_daily_stats_table()
+
+            self._py_logger.debug("Автоматическое обновление статистики выполнено без анимации")
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при автоматическом обновлении статистики: {e}")
 
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
@@ -499,7 +516,7 @@ class StatsWidget(QWidget):
         self.refresh_statistics(show_message=True)
 
     @handle_stats_errors()
-    def refresh_statistics(self, show_message=True, loading_animation=True):
+    def refresh_statistics(self, show_message=True, loading_animation=True, allow_animation=None):
         """Обновляет все отображения статистики."""
         if not self.data_provider.stats_manager:
             self._py_logger.warning("StatsManager недоступен")
@@ -513,9 +530,14 @@ class StatsWidget(QWidget):
             if show_message:
                 self._py_logger.debug("Обновление статистики запущено...")
 
+            # Определяем, нужна ли анимация
+            # Если allow_animation не указан явно, используем значение loading_animation
+            # Это означает, что анимация включена только для ручных обновлений
+            enable_animation = allow_animation if allow_animation is not None else loading_animation
+
             # Обновляем все компоненты через единый интерфейс
             self.updater.update_stats_cards()
-            self.updater.update_trend_charts(allow_animation=True)
+            self.updater.update_trend_charts(allow_animation=enable_animation)
             self.updater.update_daily_stats_table()
 
             if show_message:

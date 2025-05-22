@@ -136,7 +136,7 @@ class UpdateManager:
                     current_session_stats
                 )
 
-                # Обновляем графики без анимации
+                # ВАЖНО: Обновляем графики БЕЗ анимации для автоматических обновлений
                 stats_widget = self.main_window.stats_widget
                 stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
                 stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
@@ -146,7 +146,7 @@ class UpdateManager:
                 stats_widget.update_stats_cards()
                 stats_widget.update_daily_stats_table()
 
-                self._py_logger.debug("Графики обновлены")
+                self._py_logger.debug("Графики обновлены без анимации (автоматическое обновление)")
 
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
@@ -452,7 +452,8 @@ class MainWindow(QMainWindow):
         # Настраиваем анимацию для статистики
         if page_id == "stats":
             self._setup_stats_animation()
-            self.refresh_statistics()
+            # ИСПРАВЛЕНИЕ: Включаем анимацию явно при ручном переходе на вкладку
+            self.stats_widget.refresh_statistics(allow_animation=True)
 
         # Настраиваем частоту обновлений
         self.timer_manager.adjust_update_frequency(page_id)
