@@ -415,15 +415,8 @@ class StatsWidget(QWidget):
 
             self._py_logger.info(f"Изменение периода статистики на: {period}")
 
-            # Очищаем кэш графиков для принудительного обновления
-            if hasattr(self, 'battles_chart_widget'):
-                self.battles_chart_widget.clear_cache()
-            if hasattr(self, 'keys_chart_widget'):
-                self.keys_chart_widget.clear_cache()
-            if hasattr(self, 'silver_chart_widget'):
-                self.silver_chart_widget.clear_cache()
-
-            # Обновляем все элементы статистики
+            # ИЗМЕНЕНО: Принудительно обновляем графики БЕЗ очистки кэша с анимацией
+            # Просто перезагружаем данные для нового периода
             self.refresh_statistics(show_message=True)
 
             self._py_logger.info(f"Статистика обновлена для периода: {period}")
@@ -500,7 +493,8 @@ class StatsWidget(QWidget):
                 current_session_stats
             )
 
-            # Обновляем графики трендов
+            # ИЗМЕНЕНО: Обновляем графики БЕЗ принудительной анимации при refresh
+            # Анимация будет только при первом показе вкладки
             self.update_trend_charts(trend_data)
 
             # Получаем ежедневную статистику
@@ -547,7 +541,7 @@ class StatsWidget(QWidget):
 
     def update_trend_charts(self, trend_data=None):
         """
-        Обновляет графики трендов с последними данными.
+        Обновляет графики трендов с последними данными БЕЗ принудительной анимации.
 
         Args:
             trend_data: Готовые данные для графиков (если None, будут загружены)
@@ -577,25 +571,23 @@ class StatsWidget(QWidget):
                 self.battles_chart_widget.clear()
                 self.keys_chart_widget.clear()
                 self.silver_chart_widget.clear()
-                self.battles_chart_widget.clear_cache()
-                self.keys_chart_widget.clear_cache()
-                self.silver_chart_widget.clear_cache()
                 return
 
-            # Обновляем каждый график отдельно для более надежной работы
+            # ИЗМЕНЕНО: Обновляем графики БЕЗ принудительной очистки кэша и анимации
             try:
                 self._py_logger.debug(f"Обновление графика боев: {len(trend_data['dates'])} точек данных")
-                self.battles_chart_widget.update_chart(trend_data)
+                # force_no_animation=True для автообновлений
+                self.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика боев: {e}")
 
             try:
-                self.keys_chart_widget.update_chart(trend_data)
+                self.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
 
             try:
-                self.silver_chart_widget.update_chart(trend_data)
+                self.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")
 
@@ -782,18 +774,9 @@ class StatsWidget(QWidget):
         """Обработчик события показа виджета статистики."""
         super().showEvent(event)
 
-        # Сбрасываем флаги анимации для всех графиков при показе вкладки
-        try:
-            if hasattr(self, 'battles_chart_widget'):
-                self.battles_chart_widget.reset_animation_flag()
-            if hasattr(self, 'keys_chart_widget'):
-                self.keys_chart_widget.reset_animation_flag()
-            if hasattr(self, 'silver_chart_widget'):
-                self.silver_chart_widget.reset_animation_flag()
-
-            self._py_logger.debug("Флаги анимации графиков сброшены при показе вкладки статистики")
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при сбросе флагов анимации: {e}")
+        # ИЗМЕНЕНО: Не сбрасываем флаги анимации здесь
+        # Каждый график сам управляет своей анимацией через showEvent
+        self._py_logger.debug("Вкладка статистики показана")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""

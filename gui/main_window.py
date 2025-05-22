@@ -301,22 +301,14 @@ class MainWindow(QMainWindow):
                     current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
                 self._last_charts_update = current_time
 
-                # НОВЫЙ КОД: Принудительно обновляем статистику если бот работает
+                # ИЗМЕНЕНО: Убираем принудительную очистку кэша графиков
+                # Принудительно обновляем статистику если бот работает
                 if self.bot_engine.running.is_set():
                     # Обновляем без визуальных эффектов и сообщений
                     self.stats_widget.refresh_statistics(show_message=False, loading_animation=False)
                     self._py_logger.debug("Автоматическое обновление статистики через StatsWidget")
 
-                    # ДОБАВЛЕНО: Принудительно очищаем кэш графиков
-                    try:
-                        self.stats_widget.battles_chart_widget.clear_cache()
-                        self.stats_widget.keys_chart_widget.clear_cache()
-                        self.stats_widget.silver_chart_widget.clear_cache()
-                        self._py_logger.debug("Кэш графиков очищен")
-                    except Exception as e:
-                        self._py_logger.error(f"Ошибка при очистке кэша графиков: {e}")
-
-                    # ДОБАВЛЕНО: Принудительно обновляем графики свежими данными
+                    # ИЗМЕНЕНО: Принудительно обновляем графики без очистки кэша и анимации
                     try:
                         if hasattr(self.bot_engine, 'stats_manager'):
                             # Получаем данные для графиков
@@ -326,18 +318,18 @@ class MainWindow(QMainWindow):
                             trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
                                 current_session_stats)
 
-                            # Принудительно обновляем каждый график
-                            self.stats_widget.battles_chart_widget.update_chart(trend_data)
-                            self.stats_widget.keys_chart_widget.update_chart(trend_data)
-                            self.stats_widget.silver_chart_widget.update_chart(trend_data)
+                            # Принудительно обновляем каждый график БЕЗ анимации
+                            self.stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
+                            self.stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
+                            self.stats_widget.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
 
-                            self._py_logger.debug("Принудительное обновление графиков выполнено")
+                            self._py_logger.debug("Принудительное обновление графиков выполнено БЕЗ анимации")
                     except Exception as e:
                         self._py_logger.error(f"Ошибка при принудительном обновлении графиков: {e}")
 
                     return
 
-                # Принудительно обновляем графики только с указанным интервалом
+                # Принудительно обновляем графики только с указанным интервалом БЕЗ анимации
                 try:
                     self.stats_widget.update_trend_charts()
                     self._py_logger.debug("Обновление графиков через update_trend_charts")
@@ -372,7 +364,7 @@ class MainWindow(QMainWindow):
                     self.stats_widget.update_daily_stats_table()
                     self._py_logger.debug("Автоматическое обновление статистики выполнено (бот остановлен)")
 
-        # Обновление прогресс-бара на главной странице
+        # Обновление прогресс-бара на главной странице (без изменений)
         if self.stack.currentIndex() == self.page_indices.get("home", -1) and hasattr(self, 'home_widget'):
             # Обновляем раз в 5 секунд для экономии ресурсов
             if not hasattr(self, '_last_progress_update') or (

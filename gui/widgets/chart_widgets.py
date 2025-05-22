@@ -87,10 +87,12 @@ class ResponsiveChartWidget(QWidget):
         # Создать базовый HTML шаблон
         self.create_html_template()
 
-        # Флаг первой загрузки (для управления анимацией)
-        self.first_load = True
-
-        # Флаг для отслеживания видимости виджета
+        # ИЗМЕНЕННАЯ ЛОГИКА УПРАВЛЕНИЯ АНИМАЦИЕЙ
+        # Флаг для контроля анимации при первом показе вкладки
+        self.allow_animation_on_tab_show = True
+        # Флаг для отслеживания первого обновления после показа вкладки
+        self.first_update_after_show = True
+        # Флаг видимости виджета
         self.is_visible = False
 
         # Переменная для хранения последних данных (для перерисовки при изменении размера)
@@ -113,37 +115,65 @@ class ResponsiveChartWidget(QWidget):
         if hasattr(self, '_is_currently_updating') and self._is_currently_updating:
             return
 
-        # Если есть данные, перерисовываем график
+        # Если есть данные, перерисовываем график БЕЗ анимации при изменении размера
         if hasattr(self, 'last_data') and self.last_data:
             # Устанавливаем флаг, что перерисовка в процессе
             self._is_currently_updating = True
 
-            # Обновляем график
             try:
-                self.update_chart(self.last_data)
+                # Обновляем график БЕЗ анимации при изменении размера
+                self.update_chart(self.last_data, force_no_animation=True)
             finally:
                 # Сбрасываем флаг после окончания операции
                 self._is_currently_updating = False
-
-    def reset_animation_flag(self):
-        """Сбрасывает флаг первой загрузки для включения анимации при следующем обновлении."""
-        self.first_load = True
-        self._py_logger.debug("Флаг анимации сброшен, следующее обновление будет с анимацией")
 
     def showEvent(self, event):
         """Обработчик события показа виджета."""
         super().showEvent(event)
         self.is_visible = True
-        # При показе виджета включаем анимацию для следующего обновления
-        self.first_load = True
+
+        # При показе виджета разрешаем анимацию для следующего обновления
+        if self.allow_animation_on_tab_show:
+            self.first_update_after_show = True
+            self._py_logger.debug(f"График {self.title}: разрешена анимация при показе вкладки")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""
         super().hideEvent(event)
         self.is_visible = False
 
-    def update_chart(self, data):
-        """Обновляет график новыми данными."""
+        # При скрытии вкладки восстанавливаем возможность анимации для следующего показа
+        self.allow_animation_on_tab_show = True
+
+    def should_animate(self, force_no_animation=False):
+        """
+        Определяет, нужно ли включать анимацию для текущего обновления.
+
+        Args:
+            force_no_animation (bool): Принудительно отключить анимацию
+
+        Returns:
+            bool: True если нужна анимация, False если нет
+        """
+        if force_no_animation:
+            return False
+
+        # Анимация только при первом обновлении после показа вкладки
+        if self.first_update_after_show and self.is_visible:
+            self.first_update_after_show = False  # Отключаем для последующих обновлений
+            self._py_logger.debug(f"График {self.title}: включена анимация (первое обновление после показа)")
+            return True
+
+        return False
+
+    def update_chart(self, data, force_no_animation=False):
+        """
+        Обновляет график новыми данными.
+
+        Args:
+            data: Данные для графика
+            force_no_animation (bool): Принудительно отключить анимацию
+        """
         # Пропускаем обновление, если данные не изменились или их нет
         if not data:
             return
@@ -151,19 +181,23 @@ class ResponsiveChartWidget(QWidget):
         # Сохраняем данные для возможной перерисовки
         self.last_data = data
 
-        self._py_logger.debug(f"Начинаем обновление графика с {len(data.get('dates', []))} точками данных")
+        animation_enabled = self.should_animate(force_no_animation)
+        animation_status = "с анимацией" if animation_enabled else "без анимации"
+
+        self._py_logger.debug(
+            f"График {self.title}: обновление {animation_status}, точек данных: {len(data.get('dates', []))}")
 
     def force_reload(self):
-        """Принудительно перезагружает график с последними данными."""
+        """Принудительно перезагружает график с последними данными БЕЗ анимации."""
         if not self.last_data:
             self._py_logger.debug("Нет данных для принудительной перезагрузки графика")
             return
 
         # Очищаем кэш
-        self.clear_cache()
+        self.clear_cache(preserve_animation_state=True)
 
-        # Обновляем с последними сохраненными данными
-        self.update_chart(self.last_data)
+        # Обновляем с последними сохраненными данными БЕЗ анимации
+        self.update_chart(self.last_data, force_no_animation=True)
 
         self._py_logger.debug("Принудительная перезагрузка графика выполнена")
 
@@ -181,8 +215,13 @@ class ResponsiveChartWidget(QWidget):
             if hasattr(self, '_py_logger'):
                 self._py_logger.error(f"Ошибка при удалении временного файла: {e}")
 
-    def clear_cache(self):
-        """Очищает кэш и создает новый HTML-шаблон для принудительного обновления графика."""
+    def clear_cache(self, preserve_animation_state=False):
+        """
+        Очищает кэш и создает новый HTML-шаблон для принудительного обновления графика.
+
+        Args:
+            preserve_animation_state (bool): Сохранить текущее состояние анимации
+        """
         try:
             # Удаляем старый файл HTML, если он существует
             if self.html_path and os.path.exists(self.html_path):
@@ -193,11 +232,17 @@ class ResponsiveChartWidget(QWidget):
             self.create_html_template()
             self._py_logger.debug("Создан новый HTML-шаблон для графика")
 
-            # Сбрасываем флаг первой загрузки для включения анимации
-            self.first_load = True
+            # Управляем состоянием анимации
+            if not preserve_animation_state:
+                # Только если явно не просят сохранить состояние, разрешаем анимацию
+                # (это происходит при переходе на вкладку)
+                self.first_update_after_show = True
+                self._py_logger.debug("Состояние анимации сброшено для следующего обновления")
 
-            # Сбрасываем сохраненные данные
-            self.last_data = None
+            # Сбрасываем сохраненные данные только если не сохраняем состояние
+            if not preserve_animation_state:
+                self.last_data = None
+
         except Exception as e:
             self._py_logger.error(f"Ошибка при очистке кэша графика: {e}")
 
@@ -747,13 +792,16 @@ class BattlesChartWidget(ResponsiveChartWidget):
         except Exception as e:
             self._py_logger.error(f"Ошибка при создании HTML-шаблона графика побед: {e}")
 
-    def update_chart(self, trend_data):
+    def update_chart(self, trend_data, force_no_animation=False):
         """Обновляет график новыми данными."""
         if not trend_data or not self.html_path:
             self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
             return
 
         try:
+            # Вызываем родительский метод для логики анимации
+            super().update_chart(trend_data, force_no_animation)
+
             # Чтение текущего HTML
             with open(self.html_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
@@ -767,29 +815,22 @@ class BattlesChartWidget(ResponsiveChartWidget):
                     "defeats": []
                 }
 
-            # Сохраняем данные для возможной перерисовки при изменении размера
-            self.last_data = trend_data
-
             # Подготовка данных для JSON
             import json
             json_data = json.dumps(trend_data)
 
-            # Определяем, нужна ли анимация
-            enable_animation = self.first_load if hasattr(self, 'first_load') else True
+            # Определяем, нужна ли анимация на основе новой логики
+            enable_animation = self.should_animate(force_no_animation)
 
             # Замена плейсхолдеров данными
             updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
             updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
 
-            # После первого обновления отключаем анимацию для последующих
-            if hasattr(self, 'first_load'):
-                self.first_load = False
-
             # Запись обновленного HTML
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # Принудительная очистка кэша WebView только при первой загрузке
+            # Принудительная очистка кэша WebView только при анимации
             if enable_animation:
                 try:
                     self.web_view.page().profile().clearHttpCache()
@@ -1337,13 +1378,16 @@ class KeysChartWidget(ResponsiveChartWidget):
         except Exception as e:
             self._py_logger.error(f"Ошибка при создании HTML-шаблона графика ключей: {e}")
 
-    def update_chart(self, trend_data):
+    def update_chart(self, trend_data, force_no_animation=False):
         """Обновляет график новыми данными."""
         if not trend_data or not self.html_path:
             self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
             return
 
         try:
+            # Вызываем родительский метод для логики анимации
+            super().update_chart(trend_data, force_no_animation)
+
             # Чтение текущего HTML
             with open(self.html_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
@@ -1356,29 +1400,22 @@ class KeysChartWidget(ResponsiveChartWidget):
                     "keys_collected": []
                 }
 
-            # Сохраняем данные для возможной перерисовки при изменении размера
-            self.last_data = trend_data
-
             # Подготовка данных для JSON
             import json
             json_data = json.dumps(trend_data)
 
-            # Определяем, нужна ли анимация
-            enable_animation = self.first_load if hasattr(self, 'first_load') else True
+            # Определяем, нужна ли анимация на основе новой логики
+            enable_animation = self.should_animate(force_no_animation)
 
             # Замена плейсхолдеров данными
             updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
             updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
 
-            # После первого обновления отключаем анимацию для последующих
-            if hasattr(self, 'first_load'):
-                self.first_load = False
-
             # Запись обновленного HTML
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # Принудительная очистка кэша WebView только при первой загрузке
+            # Принудительная очистка кэша WebView только при анимации
             if enable_animation:
                 try:
                     self.web_view.page().profile().clearHttpCache()
@@ -2001,13 +2038,16 @@ class SilverChartWidget(ResponsiveChartWidget):
         except Exception as e:
             self._py_logger.error(f"Ошибка при создании HTML-шаблона графика серебра: {e}")
 
-    def update_chart(self, trend_data):
+    def update_chart(self, trend_data, force_no_animation=False):
         """Обновляет график новыми данными."""
         if not trend_data or not self.html_path:
             self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
             return
 
         try:
+            # Вызываем родительский метод для логики анимации
+            super().update_chart(trend_data, force_no_animation)
+
             # Чтение текущего HTML
             with open(self.html_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
@@ -2020,29 +2060,22 @@ class SilverChartWidget(ResponsiveChartWidget):
                     "silver_collected": []
                 }
 
-            # Сохраняем данные для возможной перерисовки при изменении размера
-            self.last_data = trend_data
-
             # Подготовка данных для JSON
             import json
             json_data = json.dumps(trend_data)
 
-            # Определяем, нужна ли анимация
-            enable_animation = self.first_load if hasattr(self, 'first_load') else True
+            # Определяем, нужна ли анимация на основе новой логики
+            enable_animation = self.should_animate(force_no_animation)
 
             # Замена плейсхолдеров данными
             updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
             updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
 
-            # После первого обновления отключаем анимацию для последующих
-            if hasattr(self, 'first_load'):
-                self.first_load = False
-
             # Запись обновленного HTML
             with open(self.html_path, 'w', encoding='utf-8') as f:
                 f.write(updated_html)
 
-            # Принудительная очистка кэша WebView только при первой загрузке
+            # Принудительная очистка кэша WebView только при анимации
             if enable_animation:
                 try:
                     self.web_view.page().profile().clearHttpCache()
