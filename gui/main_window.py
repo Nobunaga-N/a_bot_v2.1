@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QPixmap, QAction
+from functools import wraps
 
 from config import config
 from gui.styles import Styles
@@ -21,7 +22,277 @@ class BotSignals(QObject):
     log_message = pyqtSignal(str, str)  # level, message
     error = pyqtSignal(str)
     stats_updated = pyqtSignal(dict)
-    license_updated = pyqtSignal()  # Новый сигнал для обновления лицензии
+    license_updated = pyqtSignal()
+
+
+def safe_stats_operation(default_return=None):
+    """Декоратор для безопасных операций со статистикой."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
+                self._py_logger.warning(f"StatsManager недоступен для {func.__name__}")
+                return default_return
+            try:
+                return func(self, *args, **kwargs)
+            except Exception as e:
+                self._py_logger.error(f"Ошибка в {func.__name__}: {e}")
+                return default_return
+
+        return wrapper
+
+    return decorator
+
+
+class TimerManager:
+    """Менеджер таймеров для централизованного управления."""
+
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self._py_logger = main_window._py_logger
+
+        # Создаем таймеры
+        self.stats_timer = QTimer(main_window)
+        self.stats_update_timer = QTimer(main_window)
+
+        # Настраиваем таймеры
+        self.stats_timer.timeout.connect(main_window.update_runtime)
+        self.stats_update_timer.timeout.connect(main_window.auto_update_statistics)
+
+        # Переменные для отслеживания обновлений
+        self._last_charts_update = 0
+        self._last_stats_update = 0
+        self._last_progress_update = 0
+
+        self._py_logger.debug("TimerManager инициализирован")
+
+    def start_timers(self):
+        """Запускает все таймеры."""
+        self.stats_timer.start(1000)  # Каждую секунду
+        self.stats_update_timer.start(5000)  # Каждые 5 секунд
+        self._py_logger.debug("Таймеры запущены")
+
+    def adjust_update_frequency(self, page_id: str):
+        """Настраивает частоту обновлений в зависимости от страницы."""
+        if page_id == "stats":
+            # Более частое обновление на странице статистики
+            self.stats_update_timer.setInterval(1000)  # Каждую секунду
+        else:
+            # Стандартная частота для других страниц
+            self.stats_update_timer.setInterval(5000)  # Каждые 5 секунд
+
+    def should_update_charts(self, update_interval=3) -> bool:
+        """Проверяет, нужно ли обновлять графики."""
+        current_time = time.time()
+        if current_time - self._last_charts_update > update_interval:
+            self._last_charts_update = current_time
+            return True
+        return False
+
+    def should_update_stats(self, update_interval=15) -> bool:
+        """Проверяет, нужно ли обновлять статистику."""
+        current_time = time.time()
+        if current_time - self._last_stats_update > update_interval:
+            self._last_stats_update = current_time
+            return True
+        return False
+
+    def should_update_progress(self, update_interval=5) -> bool:
+        """Проверяет, нужно ли обновлять прогресс."""
+        current_time = time.time()
+        if current_time - self._last_progress_update > update_interval:
+            self._last_progress_update = current_time
+            return True
+        return False
+
+
+class UpdateManager:
+    """Менеджер обновлений для централизации логики."""
+
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.bot_engine = main_window.bot_engine
+        self._py_logger = main_window._py_logger
+        self.last_stats_hash = ""
+
+    @safe_stats_operation()
+    def update_charts_if_needed(self):
+        """Обновляет графики если необходимо."""
+        if not self.main_window.timer_manager.should_update_charts():
+            return
+
+        # Проверяем, что мы на странице статистики
+        if self.main_window.stack.currentIndex() != self.main_window.page_indices.get("stats", -1):
+            return
+
+        if self.bot_engine.running.is_set():
+            current_session_stats = None
+            if not getattr(self.bot_engine, 'session_stats_registered', False):
+                current_session_stats = self.bot_engine.stats
+
+            try:
+                trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
+                    current_session_stats
+                )
+
+                # Обновляем графики без анимации
+                stats_widget = self.main_window.stats_widget
+                stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
+                stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
+                stats_widget.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
+
+                # Обновляем карточки и таблицы
+                stats_widget.update_stats_cards()
+                stats_widget.update_daily_stats_table()
+
+                self._py_logger.debug("Графики обновлены")
+
+            except Exception as e:
+                self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
+
+    @safe_stats_operation()
+    def update_stats_if_changed(self):
+        """Обновляет статистику если данные изменились."""
+        if not self.bot_engine.running.is_set():
+            # Если бот не запущен, обновляем реже
+            if not self.main_window.timer_manager.should_update_stats():
+                return
+
+            self.main_window.stats_widget.update_stats_cards()
+            self.main_window.stats_widget.update_daily_stats_table()
+            self._py_logger.debug("Статистика обновлена (бот остановлен)")
+            return
+
+        # Проверяем изменения в статистике
+        is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
+
+        if not is_registered:
+            current_stats = self.bot_engine.stats
+            current_hash = hash(frozenset(current_stats.items()))
+
+            if str(current_hash) != self.last_stats_hash:
+                self.last_stats_hash = str(current_hash)
+
+                # Обновляем только если не обновляли графики недавно
+                if not self.main_window.timer_manager.should_update_charts(6):
+                    self.main_window.stats_widget.update_stats_cards()
+                    self.main_window.stats_widget.update_daily_stats_table()
+
+                self._py_logger.debug("Статистика обновлена (изменения обнаружены)")
+
+    @safe_stats_operation()
+    def update_progress_if_needed(self):
+        """Обновляет прогресс-бар если необходимо."""
+        if not self.main_window.timer_manager.should_update_progress():
+            return
+
+        # Только для главной страницы
+        if self.main_window.stack.currentIndex() != self.main_window.page_indices.get("home", -1):
+            return
+
+        # Проверяем изменения в прогрессе
+        home_widget = self.main_window.home_widget
+        current_display = home_widget.keys_progress_bar.current
+
+        total_progress = self.bot_engine.stats_manager.keys_current
+        is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
+
+        if not is_registered:
+            total_progress += self.bot_engine.stats.get("keys_collected", 0)
+
+        if current_display != total_progress:
+            home_widget.update_stats(self.bot_engine.stats)
+            self._py_logger.debug(f"Прогресс обновлен: {total_progress}")
+
+
+class ExportManager:
+    """Менеджер экспорта данных."""
+
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.bot_engine = main_window.bot_engine
+        self._py_logger = main_window._py_logger
+
+    @safe_stats_operation()
+    def export_statistics(self):
+        """Экспортирует статистику в CSV файл."""
+        # Запрашиваем имя файла
+        filename, _ = QFileDialog.getSaveFileName(
+            self.main_window,
+            "Экспорт статистики",
+            f"AoM_Bot_Stats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+
+        if not filename:
+            return
+
+        try:
+            # Получаем данные
+            daily_stats = self.bot_engine.stats_manager.get_daily_stats(30)
+            total_stats = self.bot_engine.stats_manager.get_total_stats()
+
+            # Экспортируем в CSV
+            self._write_csv_file(filename, daily_stats, total_stats)
+
+            QMessageBox.information(
+                self.main_window,
+                "Экспорт завершен",
+                f"Статистика успешно экспортирована в файл:\n{filename}"
+            )
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при экспорте статистики: {e}")
+            QMessageBox.critical(
+                self.main_window,
+                "Ошибка экспорта",
+                f"Не удалось экспортировать статистику: {str(e)}"
+            )
+
+    def _write_csv_file(self, filename, daily_stats, total_stats):
+        """Записывает данные в CSV файл."""
+        import csv
+
+        with open(filename, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+
+            # Заголовок
+            writer.writerow([
+                "Дата", "Боёв", "Победы", "Поражения", "% побед",
+                "Ключей собрано", "Ключей за победу", "Серебра собрано", "Потери связи", "Ошибки"
+            ])
+
+            # Ежедневные данные
+            for day in daily_stats:
+                battles = day["stats"]["victories"] + day["stats"]["defeats"]
+                win_rate = day.get("win_rate", 0)
+                keys_per_victory = day.get("keys_per_victory", 0)
+                silver_collected = day["stats"].get("silver_collected", 0)
+                silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
+
+                writer.writerow([
+                    day["date"], battles, day["stats"]["victories"], day["stats"]["defeats"],
+                    f"{win_rate:.1f}", day["stats"]["keys_collected"], f"{keys_per_victory:.1f}",
+                    silver_formatted, day["stats"]["connection_losses"], day["stats"]["errors"]
+                ])
+
+            # Разделитель и итоги
+            writer.writerow([])
+            writer.writerow(["ИТОГО:"])
+
+            battles_total = total_stats["victories"] + total_stats["defeats"]
+            win_rate_total = (total_stats["victories"] / battles_total) * 100 if battles_total > 0 else 0
+            keys_per_victory_total = (total_stats["keys_collected"] / total_stats["victories"]) if total_stats[
+                                                                                                       "victories"] > 0 else 0
+            silver_total = total_stats.get("silver_collected", 0)
+            silver_total_formatted = f"{silver_total:.1f}K" if silver_total > 0 else "0K"
+
+            writer.writerow([
+                "Всего", battles_total, total_stats["victories"], total_stats["defeats"],
+                f"{win_rate_total:.1f}", total_stats["keys_collected"], f"{keys_per_victory_total:.1f}",
+                silver_total_formatted, total_stats["connection_losses"], total_stats["errors"]
+            ])
 
 
 class MainWindow(QMainWindow):
@@ -32,43 +303,46 @@ class MainWindow(QMainWindow):
 
         self.bot_engine = bot_engine
         self.license_validator = license_validator
-
-        # Получаем ссылку на логгер
         self._py_logger = logging.getLogger("BotLogger")
 
-        # Создание и подключение сигналов
+        # Создание сигналов
         self.signals = BotSignals()
-        self.signals.state_changed.connect(self.update_bot_state)
-        self.signals.log_message.connect(self.append_log)
-        self.signals.error.connect(self.show_error)
-        self.signals.stats_updated.connect(self.update_stats)
-        self.signals.license_updated.connect(self.on_license_updated)  # Подключаем новый сигнал
+        self._connect_signals()
 
         # Установка сигналов бота
         self.bot_engine.set_signals(self.signals)
 
-        # Переменная для отслеживания изменений в статистике
-        self.last_stats_hash = ""
+        # Инициализация менеджеров
+        self.timer_manager = TimerManager(self)
+        self.update_manager = UpdateManager(self)
+        self.export_manager = ExportManager(self)
 
-        # Время начала работы бота
-        self.start_time = None
-
-        # Инициализация UI (таймеры будут созданы внутри)
+        # Инициализация UI
         self.init_ui()
 
         # Подключение сигналов между виджетами
         self.connect_widget_signals()
+
+        # Запуск таймеров
+        self.timer_manager.start_timers()
+
+    def _connect_signals(self):
+        """Подключает сигналы."""
+        self.signals.state_changed.connect(self.update_bot_state)
+        self.signals.log_message.connect(self.append_log)
+        self.signals.error.connect(self.show_error)
+        self.signals.stats_updated.connect(self.update_stats)
+        self.signals.license_updated.connect(self.on_license_updated)
 
     def init_ui(self):
         """Инициализация компонентов интерфейса."""
         self.setWindowTitle("Age of Magic Бот v2.0")
         self.setMinimumSize(1000, 800)
 
-        # Центральный виджет
+        # Центральный виджет и основной лейаут
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Основной лейаут
         main_layout = QHBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -84,35 +358,20 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.addWidget(self.content_widget)
 
-        # Стек виджетов для отображения разных страниц
+        # Стек виджетов для разных страниц
         self.stack = QStackedWidget()
         content_layout.addWidget(self.stack)
 
         # Инициализация страниц
         self.init_pages()
 
-        # Статус-бар
+        # Статус-бар и меню
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Готово")
-
-        # Обновление информации о лицензии в статус-баре
         self.update_license_status()
-
-        # Добавление меню
         self.create_menu()
 
-        # Инициализируем таймеры ПЕРЕД переключением на главную страницу
-        # Таймер для обновления времени работы
-        self.stats_timer = QTimer(self)
-        self.stats_timer.timeout.connect(self.update_runtime)
-        self.stats_timer.start(1000)  # Обновление каждую секунду
-
-        # Таймер для автоматического обновления статистики
-        self.stats_update_timer = QTimer(self)
-        self.stats_update_timer.timeout.connect(self.auto_update_statistics)
-        self.stats_update_timer.start(5000)  # Обновление каждые 5 секунд
-
-        # ТЕПЕРЬ можно безопасно переключиться на главную страницу
+        # Устанавливаем главную страницу
         self.stack.setCurrentIndex(self.page_indices.get("home", 0))
 
     def create_menu(self):
@@ -122,15 +381,12 @@ class MainWindow(QMainWindow):
         # Меню "Файл"
         file_menu = menu_bar.addMenu("Файл")
 
-        # Пункт "Экспорт статистики"
         export_action = QAction("Экспорт статистики", self)
-        export_action.triggered.connect(self.export_statistics)
+        export_action.triggered.connect(self.export_manager.export_statistics)
         file_menu.addAction(export_action)
 
-        # Разделитель
         file_menu.addSeparator()
 
-        # Пункт "Выход"
         exit_action = QAction("Выход", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -138,405 +394,135 @@ class MainWindow(QMainWindow):
         # Меню "Справка"
         help_menu = menu_bar.addMenu("Справка")
 
-        # Пункт "О программе"
         about_action = QAction("О программе", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
     def init_pages(self):
         """Инициализация страниц приложения."""
-        # Импортируем все необходимые страницы
         from gui.widgets.home_widget import HomeWidget
         from gui.widgets.stats_widget import StatsWidget
         from gui.widgets.settings_widget import SettingsWidget
         from gui.widgets.license_widget import LicenseWidget
-        from gui.widgets.log_widget import LogWidget
 
-        # Создаём экземпляры страниц
-        # Важно: передаем валидатор лицензии в HomeWidget
-        self.home_widget = HomeWidget(
-            self.bot_engine,
-            self.signals,
-            license_validator=self.license_validator,
-            parent=self
-        )
+        # Создаём страницы
+        self.home_widget = HomeWidget(self.bot_engine, self.signals,
+                                      license_validator=self.license_validator, parent=self)
         self.stats_widget = StatsWidget(self.bot_engine)
         self.log_widget = LogWidget()
         self.settings_widget = SettingsWidget(self.bot_engine)
         self.license_widget = LicenseWidget(self.license_validator)
 
-        # Добавляем страницы в стек
-        self.stack.addWidget(self.home_widget)
-        self.stack.addWidget(self.stats_widget)
-        self.stack.addWidget(self.log_widget)
-        self.stack.addWidget(self.settings_widget)
-        self.stack.addWidget(self.license_widget)
+        # Добавляем в стек
+        pages = [
+            (self.home_widget, "home"),
+            (self.stats_widget, "stats"),
+            (self.log_widget, "logs"),
+            (self.settings_widget, "settings"),
+            (self.license_widget, "license")
+        ]
 
-        # Словарь для отображения ID страниц в индексы стека
-        self.page_indices = {
-            "home": 0,
-            "stats": 1,
-            "logs": 2,
-            "settings": 3,
-            "license": 4
-        }
+        self.page_indices = {}
+        for i, (widget, page_id) in enumerate(pages):
+            self.stack.addWidget(widget)
+            self.page_indices[page_id] = i
 
     def connect_widget_signals(self):
         """Подключение сигналов между виджетами."""
-        # Подключаем сигнал изменения цели по ключам от настроек к домашнему экрану
         self.settings_widget.target_keys_changed.connect(self.home_widget.set_target_keys)
 
-        # Загружаем начальное значение цели из конфигурации
+        # Загружаем начальное значение цели
         target_keys = config.get("bot", "target_keys", 1000)
         self.home_widget.set_target_keys(target_keys)
 
     def change_page(self, page_id):
-        """
-        Изменяет отображаемую страницу.
+        """Изменяет отображаемую страницу."""
+        if page_id not in self.page_indices:
+            return
 
-        Args:
-            page_id (str): ID страницы для отображения
-        """
-        if page_id in self.page_indices:
-            self.stack.setCurrentIndex(self.page_indices[page_id])
+        self.stack.setCurrentIndex(self.page_indices[page_id])
 
-            # Если есть боковое меню, синхронизируем активную страницу
-            if hasattr(self, 'sidebar'):
-                # Это гарантирует, что боковое меню показывает правильную активную страницу
-                buttons = getattr(self.sidebar, 'buttons', {})
-                if page_id in buttons:
-                    self.sidebar.active_page = page_id
-                    for p, button in buttons.items():
-                        button.setChecked(p == page_id)
+        # Синхронизируем боковое меню
+        if hasattr(self, 'sidebar'):
+            self.sidebar.active_page = page_id
+            buttons = getattr(self.sidebar, 'buttons', {})
+            for p, button in buttons.items():
+                button.setChecked(p == page_id)
 
-            # ИСПРАВЛЕНО: Обновляем статистику и настраиваем анимацию при переходе на страницу статистики
-            if page_id == "stats":
-                # ИСПРАВЛЕНО: Устанавливаем флаги анимации для графиков перед обновлением
-                if hasattr(self, 'stats_widget'):
-                    # Разрешаем анимацию для всех графиков при следующем обновлении
-                    if hasattr(self.stats_widget, 'battles_chart_widget'):
-                        self.stats_widget.battles_chart_widget.should_animate_next = True
-                        self.stats_widget.battles_chart_widget.has_animated_since_show = False
-                        self._py_logger.debug("Установлен флаг анимации для графика побед")
+        # Настраиваем анимацию для статистики
+        if page_id == "stats":
+            self._setup_stats_animation()
+            self.refresh_statistics()
 
-                    if hasattr(self.stats_widget, 'keys_chart_widget'):
-                        self.stats_widget.keys_chart_widget.should_animate_next = True
-                        self.stats_widget.keys_chart_widget.has_animated_since_show = False
-                        self._py_logger.debug("Установлен флаг анимации для графика ключей")
+        # Настраиваем частоту обновлений
+        self.timer_manager.adjust_update_frequency(page_id)
 
-                    if hasattr(self.stats_widget, 'silver_chart_widget'):
-                        self.stats_widget.silver_chart_widget.should_animate_next = True
-                        self.stats_widget.silver_chart_widget.has_animated_since_show = False
-                        self._py_logger.debug("Установлен флаг анимации для графика серебра")
+    def _setup_stats_animation(self):
+        """Настраивает анимацию для страницы статистики."""
+        chart_widgets = [
+            self.stats_widget.battles_chart_widget,
+            self.stats_widget.keys_chart_widget,
+            self.stats_widget.silver_chart_widget
+        ]
 
-                # Обновляем статистику с анимацией
-                self.refresh_statistics()
+        for chart_widget in chart_widgets:
+            if hasattr(chart_widget, 'should_animate_next'):
+                chart_widget.should_animate_next = True
+                chart_widget.has_animated_since_show = False
 
-                # Более частое обновление на странице статистики
-                if hasattr(self, 'stats_update_timer'):
-                    self.stats_update_timer.stop()
-                    self.stats_update_timer.setInterval(1000)
-                    self.stats_update_timer.start()
-            else:
-                # Стандартный интервал обновления для других страниц
-                if hasattr(self, 'stats_update_timer'):
-                    self.stats_update_timer.stop()
-                    self.stats_update_timer.setInterval(5000)
-                    self.stats_update_timer.start()
-
+    # Обработчики событий
     def update_bot_state(self, state):
-        """
-        Обновляет UI для отображения текущего состояния бота.
-
-        Args:
-            state (str): Состояние бота
-        """
-        # Обновление состояния на главной странице
+        """Обновляет UI для отображения состояния бота."""
         self.home_widget.update_bot_state(state)
 
     def append_log(self, level, message):
-        """
-        Добавляет сообщение в лог.
-
-        Args:
-            level (str): Уровень сообщения
-            message (str): Текст сообщения
-        """
-        # Передаем сообщение только в отдельный виджет логов
+        """Добавляет сообщение в лог."""
         self.log_widget.append_log(level, message)
 
     def update_stats(self, stats):
-        """
-        Обновляет отображение статистики.
-
-        Args:
-            stats (dict): Статистика бота
-        """
-        # Обновляем статистику на главной странице
+        """Обновляет отображение статистики."""
         self.home_widget.update_stats(stats)
 
     def update_runtime(self):
         """Обновляет отображение времени работы бота."""
-        # Проверяем, запущен ли бот
         if self.bot_engine.running.is_set():
-            # Убедимся, что start_time инициализирован в home_widget
             if self.home_widget.start_time is None:
                 self.home_widget.start_time = time.time()
 
-            # Обновление времени работы на главной странице
             self.home_widget.update_runtime()
-
-            # Также обновляем статистику от движка бота
             self.update_stats(self.bot_engine.stats)
         else:
-            # Если бот не запущен, но start_time есть - сбрасываем его
             if hasattr(self.home_widget, 'start_time') and self.home_widget.start_time is not None:
                 self.home_widget.start_time = None
                 self.home_widget.update_runtime()
 
+    @safe_stats_operation()
     def refresh_statistics(self):
         """Обновляет все отображения статистики."""
-        # Проверяем, доступен ли stats_manager
-        if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-            return
-
-        # Обновляем статистику на странице статистики
         self.stats_widget.refresh_statistics()
 
     def auto_update_statistics(self):
-        """Автоматически обновляет статистику если данные изменились."""
-        # Проверяем, доступен ли stats_manager
-        if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-            return
-
-        # Инициализация текущего времени для использования во всем методе
-        current_time = time.time()
-
-        # Обновляем только если мы на вкладке статистики
-        if self.stack.currentIndex() == self.page_indices.get("stats", -1):
-            # Проверяем время последнего обновления графиков
-            update_interval = 3  # Минимальный интервал между обновлениями графиков (в секундах)
-
-            if not hasattr(self, '_last_charts_update') or (
-                    current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
-                self._last_charts_update = current_time
-
-                # ИСПРАВЛЕНО: Корректная логика автообновления графиков
-                if self.bot_engine.running.is_set():
-                    # Получаем данные для обновления
-                    current_session_stats = None
-                    if not getattr(self.bot_engine, 'session_stats_registered', False):
-                        current_session_stats = self.bot_engine.stats
-                        self._py_logger.debug("Автообновление: используем статистику текущей сессии")
-                    else:
-                        self._py_logger.debug("Автообновление: сессия уже зарегистрирована")
-
-                    # ИСПРАВЛЕНО: Получаем актуальные данные для графиков
-                    try:
-                        # Получаем данные трендов с учетом текущей сессии
-                        trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
-                            current_session_stats
-                        )
-
-                        # ИСПРАВЛЕНО: Обновляем каждый график с актуальными данными БЕЗ анимации
-                        self.stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
-                        self.stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
-                        self.stats_widget.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
-
-                        self._py_logger.debug("Автообновление графиков выполнено с актуальными данными")
-
-                        # Также обновляем карточки и таблицы
-                        self.stats_widget.update_stats_cards()
-                        self.stats_widget.update_daily_stats_table()
-
-                    except Exception as e:
-                        self._py_logger.error(f"Ошибка при автообновлении графиков: {e}")
-
-                    return
-
-            # Если бот запущен, проверяем изменение статистики для других компонентов
-            if self.bot_engine.running.is_set():
-                # Проверяем, была ли сессия уже зарегистрирована
-                is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
-
-                # Только если сессия не зарегистрирована, обновляем статистику с учетом текущей сессии
-                if not is_registered:
-                    current_stats = self.bot_engine.stats
-                    current_hash = hash(frozenset(current_stats.items()))
-
-                    if str(current_hash) != self.last_stats_hash:
-                        self.last_stats_hash = str(current_hash)
-                        # Обновляем только табличные данные, графики уже обновлены выше
-                        if not hasattr(self, '_last_charts_update') or (
-                                current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
-                            # Если прошло достаточно времени, обновляем и карточки
-                            self.stats_widget.update_stats_cards()
-                            self.stats_widget.update_daily_stats_table()
-
-                        self._py_logger.debug("Автоматическое обновление статистики выполнено (бот запущен)")
-                else:
-                    self._py_logger.debug("Статистика сессии уже зарегистрирована, не обновляем текущие данные")
-            else:
-                # Если бот не запущен, обновляем реже
-                if not hasattr(self, '_last_stats_update') or (
-                        current_time - getattr(self, '_last_stats_update', 0)) > 15:
-                    self._last_stats_update = current_time
-                    # Обновляем только табличные данные
-                    self.stats_widget.update_stats_cards()
-                    self.stats_widget.update_daily_stats_table()
-                    self._py_logger.debug("Автоматическое обновление статистики выполнено (бот остановлен)")
-
-        # Обновление прогресс-бара на главной странице (без изменений)
-        if self.stack.currentIndex() == self.page_indices.get("home", -1) and hasattr(self, 'home_widget'):
-            # Обновляем раз в 5 секунд для экономии ресурсов
-            if not hasattr(self, '_last_progress_update') or (
-                    current_time - getattr(self, '_last_progress_update', 0)) > 5:
-                self._last_progress_update = current_time
-
-                # Проверяем, изменились ли данные перед обновлением
-                if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
-                    # Получаем текущее значение из прогресс-бара для сравнения
-                    current_display = self.home_widget.keys_progress_bar.current
-
-                    # Вычисляем общий прогресс с учетом текущей сессии
-                    total_progress = 0
-                    if hasattr(self.bot_engine.stats_manager, 'keys_current'):
-                        total_progress = self.bot_engine.stats_manager.keys_current
-
-                    # Добавляем ключи текущей сессии только если сессия не зарегистрирована
-                    is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
-                    total_with_session = total_progress
-                    if not is_registered:
-                        total_with_session += self.bot_engine.stats.get("keys_collected", 0)
-
-                    # Если значения отличаются, обновляем
-                    if current_display != total_with_session:
-                        # Обновляем прогресс-бар явно передавая флаг о регистрации сессии
-                        self.home_widget.update_stats(self.bot_engine.stats)
-                        self._py_logger.debug(
-                            f"Обновлен прогресс ключей: {total_with_session} (общий: {total_progress} + сессия: {0 if is_registered else self.bot_engine.stats.get('keys_collected', 0)})")
-
-    def export_statistics(self):
-        """Экспортирует статистику в CSV файл."""
-        # Проверяем, доступен ли stats_manager
-        if not hasattr(self.bot_engine, 'stats_manager') or self.bot_engine.stats_manager is None:
-            QMessageBox.warning(self, "Экспорт невозможен", "Статистика недоступна для экспорта.")
-            return
-
-        # Запрашиваем имя файла для сохранения
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Экспорт статистики",
-            f"AoM_Bot_Stats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            "CSV Files (*.csv);;All Files (*)"
-        )
-
-        if not filename:
-            return  # Пользователь отменил сохранение
-
-        try:
-            # Получаем данные для экспорта
-            daily_stats = self.bot_engine.stats_manager.get_daily_stats(30)  # Берем статистику за 30 дней
-            total_stats = self.bot_engine.stats_manager.get_total_stats()
-
-            # Создаем CSV файл
-            import csv
-            with open(filename, 'w', newline='', encoding='utf-8') as file:
-                writer = csv.writer(file)
-
-                # Записываем заголовок
-                writer.writerow([
-                    "Дата", "Боёв", "Победы", "Поражения", "% побед",
-                    "Ключей собрано", "Ключей за победу", "Серебра собрано", "Потери связи", "Ошибки"
-                ])
-
-                # Записываем ежедневную статистику
-                for day in daily_stats:
-                    battles = day["stats"]["victories"] + day["stats"]["defeats"]
-                    win_rate = day.get("win_rate", 0)
-                    keys_per_victory = day.get("keys_per_victory", 0)
-                    silver_collected = day["stats"].get("silver_collected", 0)
-                    silver_formatted = f"{silver_collected:.1f}K" if silver_collected > 0 else "0K"
-
-                    writer.writerow([
-                        day["date"],
-                        battles,
-                        day["stats"]["victories"],
-                        day["stats"]["defeats"],
-                        f"{win_rate:.1f}",
-                        day["stats"]["keys_collected"],
-                        f"{keys_per_victory:.1f}",
-                        silver_formatted,
-                        day["stats"]["connection_losses"],
-                        day["stats"]["errors"]
-                    ])
-
-                # Пустая строка-разделитель
-                writer.writerow([])
-
-                # Записываем итоговую статистику
-                writer.writerow(["ИТОГО:"])
-                battles_total = total_stats["victories"] + total_stats["defeats"]
-                win_rate_total = (total_stats["victories"] / battles_total) * 100 if battles_total > 0 else 0
-                keys_per_victory_total = (total_stats["keys_collected"] / total_stats["victories"]) if total_stats[
-                                                                                                           "victories"] > 0 else 0
-                silver_total = total_stats.get("silver_collected", 0)
-                silver_total_formatted = f"{silver_total:.1f}K" if silver_total > 0 else "0K"
-
-                writer.writerow([
-                    "Всего",
-                    battles_total,
-                    total_stats["victories"],
-                    total_stats["defeats"],
-                    f"{win_rate_total:.1f}",
-                    total_stats["keys_collected"],
-                    f"{keys_per_victory_total:.1f}",
-                    silver_total_formatted,
-                    total_stats["connection_losses"],
-                    total_stats["errors"]
-                ])
-
-            QMessageBox.information(
-                self,
-                "Экспорт завершен",
-                f"Статистика успешно экспортирована в файл:\n{filename}"
-            )
-
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при экспорте статистики: {e}")
-            import traceback
-            self._py_logger.error(traceback.format_exc())
-
-            QMessageBox.critical(
-                self,
-                "Ошибка экспорта",
-                f"Не удалось экспортировать статистику: {str(e)}"
-            )
+        """Автоматическое обновление статистики."""
+        # Используем менеджер обновлений для централизованной логики
+        self.update_manager.update_charts_if_needed()
+        self.update_manager.update_stats_if_changed()
+        self.update_manager.update_progress_if_needed()
 
     def show_error(self, message):
-        """
-        Показывает сообщение об ошибке.
-
-        Args:
-            message (str): Текст сообщения об ошибке
-        """
+        """Показывает сообщение об ошибке."""
         QMessageBox.critical(self, "Ошибка", message)
 
     def on_license_updated(self):
         """Обработчик обновления лицензии."""
-        # Обновляем статус лицензии в статус-баре
         self.update_license_status()
 
-        # Обновляем интерфейс HomeWidget для отражения нового статуса лицензии
         if hasattr(self, 'home_widget'):
             self.home_widget.update_license_status()
 
-        # Обновляем интерфейс LicenseWidget
         if hasattr(self, 'license_widget'):
             self.license_widget.update_license_info()
 
-        # Логируем изменение
-        self._py_logger.debug("Статус лицензии обновлен во всех компонентах интерфейса")
+        self._py_logger.debug("Статус лицензии обновлен")
 
     def update_license_status(self):
         """Обновляет статус лицензии в статус-баре."""
@@ -544,10 +530,8 @@ class MainWindow(QMainWindow):
             license_info = self.license_validator.get_license_info()
             days_left = license_info.get("days_left", 0)
             self.statusBar().showMessage(f"Лицензия: Действительна (осталось {days_left} дней)")
-            self._py_logger.info(f"Статус лицензии: Действительна (осталось {days_left} дней)")
         else:
             self.statusBar().showMessage("Лицензия: Недействительна или истекла")
-            self._py_logger.info("Статус лицензии: Недействительна или истекла")
 
     def show_about(self):
         """Показывает диалог с информацией о программе."""
@@ -564,7 +548,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Обработка события закрытия окна."""
         if self.bot_engine.running.is_set():
-            from PyQt6.QtWidgets import QMessageBox
             reply = QMessageBox.question(
                 self,
                 "Подтверждение выхода",
@@ -575,28 +558,24 @@ class MainWindow(QMainWindow):
 
             if reply == QMessageBox.StandardButton.Yes:
                 try:
-                    # Останавливаем бота - это автоматически сохранит статистику и прогресс
                     self.bot_engine.stop()
                     self._py_logger.info("Бот остановлен при закрытии программы")
-
-                    # Принимаем событие закрытия
                     event.accept()
                 except Exception as e:
                     self._py_logger.error(f"Ошибка при остановке бота: {e}")
-                    # Все равно принимаем событие закрытия
                     event.accept()
             else:
                 event.ignore()
         else:
-            # Если бот не запущен, проверяем наличие несохраненных данных и что они не были уже зарегистрированы
-            if hasattr(self.bot_engine, 'stats') and any(val > 0 for val in self.bot_engine.stats.values()) and \
-                    not getattr(self.bot_engine, 'session_stats_registered', False):
+            # Сохраняем несохраненные данные если есть
+            if (hasattr(self.bot_engine, 'stats') and
+                    any(val > 0 for val in self.bot_engine.stats.values()) and
+                    not getattr(self.bot_engine, 'session_stats_registered', False)):
                 try:
-                    # Регистрируем текущую сессию, только если она еще не была зарегистрирована
                     if self.bot_engine.stats_manager:
                         self.bot_engine.notify_stats_manager_session_ended()
-                        self._py_logger.info("Статистика текущей сессии сохранена при закрытии программы")
+                        self._py_logger.info("Статистика сохранена при закрытии")
                 except Exception as e:
-                    self._py_logger.error(f"Ошибка при сохранении данных при закрытии: {e}")
+                    self._py_logger.error(f"Ошибка при сохранении данных: {e}")
 
             event.accept()
