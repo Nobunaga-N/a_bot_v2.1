@@ -115,38 +115,41 @@ class UpdateManager:
         self.bot_engine = main_window.bot_engine
         self._py_logger = main_window._py_logger
         self.last_stats_hash = ""
+        self._last_chart_update = 0
 
     @safe_stats_operation()
     def update_charts_if_needed(self):
         """Обновляет графики если необходимо."""
-        if not self.main_window.timer_manager.should_update_charts():
-            return
-
         # Проверяем, что мы на странице статистики
         if self.main_window.stack.currentIndex() != self.main_window.page_indices.get("stats", -1):
             return
 
+        # Ограничиваем частоту обновления графиков
+        current_time = time.time()
+        if current_time - self._last_chart_update < 3:  # Не чаще раз в 3 секунды
+            return
+
+        if not self.main_window.timer_manager.should_update_charts():
+            return
+
+        self._last_chart_update = current_time
+
         if self.bot_engine.running.is_set():
-            current_session_stats = None
-            if not getattr(self.bot_engine, 'session_stats_registered', False):
-                current_session_stats = self.bot_engine.stats
-
             try:
-                trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
-                    current_session_stats
-                )
-
-                # ВАЖНО: Обновляем графики БЕЗ анимации для автоматических обновлений
+                # ВАЖНО: Для автоматических обновлений ВСЕГДА используем force_no_animation=True
                 stats_widget = self.main_window.stats_widget
-                stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
-                stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
-                stats_widget.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
 
-                # Обновляем карточки и таблицы
-                stats_widget.update_stats_cards()
-                stats_widget.update_daily_stats_table()
+                # Обновляем только если виджет видимый
+                if hasattr(stats_widget, '_is_currently_visible') and stats_widget._is_currently_visible:
+                    # Используем внутренний метод обновления графиков с проверкой изменений
+                    if hasattr(stats_widget, 'updater') and stats_widget.updater:
+                        stats_widget.updater.update_trend_charts(allow_animation=False)
 
-                self._py_logger.debug("Графики обновлены без анимации (автоматическое обновление)")
+                    # Обновляем карточки и таблицы
+                    stats_widget.update_stats_cards()
+                    stats_widget.update_daily_stats_table()
+
+                    self._py_logger.debug("Автоматическое обновление графиков выполнено без анимации")
 
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
@@ -159,9 +162,13 @@ class UpdateManager:
             if not self.main_window.timer_manager.should_update_stats():
                 return
 
-            self.main_window.stats_widget.update_stats_cards()
-            self.main_window.stats_widget.update_daily_stats_table()
-            self._py_logger.debug("Статистика обновлена (бот остановлен)")
+            # Проверяем, что виджет видимый
+            if (hasattr(self.main_window, 'stats_widget') and
+                    hasattr(self.main_window.stats_widget, '_is_currently_visible') and
+                    self.main_window.stats_widget._is_currently_visible):
+                self.main_window.stats_widget.update_stats_cards()
+                self.main_window.stats_widget.update_daily_stats_table()
+                self._py_logger.debug("Статистика обновлена (бот остановлен)")
             return
 
         # Проверяем изменения в статистике
@@ -174,8 +181,10 @@ class UpdateManager:
             if str(current_hash) != self.last_stats_hash:
                 self.last_stats_hash = str(current_hash)
 
-                # Обновляем только если не обновляли графики недавно
-                if not self.main_window.timer_manager.should_update_charts(6):
+                # Обновляем только карточки и таблицу, не графики (они обновляются отдельно)
+                if (hasattr(self.main_window, 'stats_widget') and
+                        hasattr(self.main_window.stats_widget, '_is_currently_visible') and
+                        self.main_window.stats_widget._is_currently_visible):
                     self.main_window.stats_widget.update_stats_cards()
                     self.main_window.stats_widget.update_daily_stats_table()
 
@@ -440,7 +449,14 @@ class MainWindow(QMainWindow):
         if page_id not in self.page_indices:
             return
 
-        self.stack.setCurrentIndex(self.page_indices[page_id])
+        old_page_index = self.stack.currentIndex()
+        new_page_index = self.page_indices[page_id]
+
+        # Если уже на этой странице, ничего не делаем
+        if old_page_index == new_page_index:
+            return
+
+        self.stack.setCurrentIndex(new_page_index)
 
         # Синхронизируем боковое меню
         if hasattr(self, 'sidebar'):
@@ -449,11 +465,12 @@ class MainWindow(QMainWindow):
             for p, button in buttons.items():
                 button.setChecked(p == page_id)
 
-        # Настраиваем анимацию для статистики
+        # Специальная обработка для страницы статистики
         if page_id == "stats":
             self._setup_stats_animation()
-            # ИСПРАВЛЕНИЕ: Включаем анимацию явно при ручном переходе на вкладку
-            self.stats_widget.refresh_statistics(allow_animation=True)
+            # Обновляем статистику с анимацией при ручном переходе
+            QTimer.singleShot(100, lambda: self.stats_widget.refresh_statistics(allow_animation=True))
+            self._py_logger.debug("Переход на страницу статистики с анимацией")
 
         # Настраиваем частоту обновлений
         self.timer_manager.adjust_update_frequency(page_id)
@@ -470,6 +487,8 @@ class MainWindow(QMainWindow):
             if hasattr(chart_widget, 'should_animate_next'):
                 chart_widget.should_animate_next = True
                 chart_widget.has_animated_since_show = False
+
+        self._py_logger.debug("Анимация графиков настроена для показа")
 
     # Обработчики событий
     def update_bot_state(self, state):
