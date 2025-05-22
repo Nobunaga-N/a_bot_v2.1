@@ -3,406 +3,292 @@ import json
 import logging
 import datetime
 from typing import Dict, List, Any, Optional
+from functools import wraps
+
+
+def validate_stats_data(func):
+    """Декоратор для валидации данных статистики."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            self.logger.error(f"Ошибка в {func.__name__}: {e}")
+            return {} if 'dict' in str(func.__annotations__.get('return', '')) else []
+
+    return wrapper
+
+
+class FileManager:
+    """Менеджер для безопасной работы с файлами."""
+
+    def __init__(self, logger):
+        self.logger = logger
+
+    def safe_save(self, file_path: str, data: dict) -> bool:
+        """Безопасное сохранение данных в файл."""
+        try:
+            # Добавляем timestamp
+            data["last_updated"] = datetime.datetime.now().isoformat()
+
+            # Сохраняем через временный файл
+            temp_file = f"{file_path}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+
+            # Создаем резервную копию если нужно
+            if os.path.exists(file_path):
+                backup_file = f"{file_path}.bak"
+                try:
+                    import shutil
+                    shutil.copy2(file_path, backup_file)
+                except Exception as e:
+                    self.logger.warning(f"Не удалось создать резервную копию: {e}")
+
+            # Заменяем оригинальный файл
+            os.replace(temp_file, file_path)
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при сохранении {file_path}: {e}")
+            return False
+
+    def safe_load(self, file_path: str) -> dict:
+        """Безопасная загрузка данных из файла."""
+        if not os.path.exists(file_path):
+            return {}
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            self.logger.error(f"Ошибка при загрузке {file_path}: {e}")
+            return {}
+
+
+class StatsAggregator:
+    """Агрегатор для расчета статистики."""
+
+    @staticmethod
+    def calculate_derived_stats(stats: Dict[str, int]) -> Dict[str, float]:
+        """Вычисляет производные показатели."""
+        battles = stats.get("victories", 0) + stats.get("defeats", 0)
+        victories = stats.get("victories", 0)
+
+        result = {
+            "battles": battles,
+            "win_rate": (victories / battles * 100) if battles > 0 else 0,
+            "keys_per_victory": (stats.get("keys_collected", 0) / victories) if victories > 0 else 0
+        }
+
+        return result
+
+    @staticmethod
+    def calculate_time_metrics(duration_hours: float, stats: Dict[str, int]) -> Dict[str, float]:
+        """Вычисляет временные метрики."""
+        if duration_hours <= 0:
+            return {"battles_per_hour": 0, "keys_per_hour": 0}
+
+        battles = stats.get("victories", 0) + stats.get("defeats", 0)
+        return {
+            "battles_per_hour": battles / duration_hours,
+            "keys_per_hour": stats.get("keys_collected", 0) / duration_hours
+        }
+
+    @staticmethod
+    def merge_stats(*stats_dicts) -> Dict[str, int]:
+        """Объединяет несколько словарей статистики."""
+        result = {
+            "battles_started": 0, "victories": 0, "defeats": 0,
+            "connection_losses": 0, "errors": 0, "keys_collected": 0,
+            "silver_collected": 0
+        }
+
+        for stats in stats_dicts:
+            if not stats:
+                continue
+            for key, value in stats.items():
+                if key in result and isinstance(value, (int, float)):
+                    result[key] += value
+
+        return result
 
 
 class StatsManager:
-    """
-    Manages statistics for the bot, including persistence between sessions.
+    """Управляет статистикой бота с централизованной логикой."""
 
-    Ответственность:
-    - Хранение и управление историческими данными
-    - Управление общим прогрессом ключей
-    - Агрегирование статистики по разным периодам
-    - Сохранение/загрузка данных из файлов
-    """
+    # Шаблон статистики по умолчанию
+    DEFAULT_STATS = {
+        "battles_started": 0, "victories": 0, "defeats": 0,
+        "connection_losses": 0, "errors": 0, "keys_collected": 0,
+        "silver_collected": 0
+    }
 
     def __init__(self, stats_dir: str):
-        """
-        Initialize the stats manager.
-
-        Args:
-            stats_dir: Directory to store statistics files
-        """
+        """Инициализация менеджера статистики."""
         self.logger = logging.getLogger("BotLogger")
         self.stats_dir = stats_dir
 
-        # Create stats directory if it doesn't exist
-        if not os.path.exists(self.stats_dir):
-            os.makedirs(self.stats_dir, exist_ok=True)
+        # Создаем каталог если нужно
+        os.makedirs(self.stats_dir, exist_ok=True)
 
-        # Path to the main stats file
+        # Пути к файлам
         self.stats_file = os.path.join(self.stats_dir, "bot_stats.json")
-
-        # Path to the keys progress file
         self.keys_progress_file = os.path.join(self.stats_dir, "keys_progress.json")
 
-        # Общий прогресс по ключам (сохраняется между сессиями)
-        self.keys_target = 1000  # Целевое значение
-        self.keys_current = 0  # Текущее значение
+        # Инициализируем компоненты
+        self.file_manager = FileManager(self.logger)
+        self.aggregator = StatsAggregator()
 
-        # Historical stats with timestamps
+        # Данные
         self.history = []
+        self.keys_target = 1000
+        self.keys_current = 0
 
-        # Загружаем данные из файлов
-        self.load_keys_progress()
-        self.load_stats()
+        # Загружаем данные
+        self._load_all_data()
 
-        # Log initialization
-        self.logger.info(f"StatsManager инициализирован. Загружено {len(self.history)} исторических записей.")
-        self.logger.info(f"Текущий прогресс ключей: {self.keys_current}/{self.keys_target}")
+        self.logger.info(f"StatsManager инициализирован. История: {len(self.history)} записей. "
+                         f"Ключи: {self.keys_current}/{self.keys_target}")
 
-    def load_stats(self) -> bool:
-        """
-        Load statistics from file.
+    def _load_all_data(self):
+        """Загружает все данные из файлов."""
+        # Загружаем основную статистику
+        stats_data = self.file_manager.safe_load(self.stats_file)
+        self.history = stats_data.get("history", [])
 
-        Returns:
-            True if statistics were successfully loaded, False otherwise
-        """
-        if not os.path.exists(self.stats_file):
-            self.logger.info("Файл статистики не найден. Будет создан новый файл.")
-            return False
+        # Загружаем прогресс ключей
+        keys_data = self.file_manager.safe_load(self.keys_progress_file)
+        self.keys_target = keys_data.get("target", 1000)
+        self.keys_current = keys_data.get("current", 0)
 
-        try:
-            with open(self.stats_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        # Валидация данных
+        self._validate_keys_data()
 
-            if "history" in data:
-                self.history = data["history"]
+    def _validate_keys_data(self):
+        """Валидирует и исправляет данные ключей."""
+        if not isinstance(self.keys_target, int) or self.keys_target <= 0:
+            self.logger.warning(f"Некорректная цель ключей ({self.keys_target}), установлено 1000")
+            self.keys_target = 1000
 
-            self.logger.info(f"Статистика успешно загружена. Количество исторических записей: {len(self.history)}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при загрузке статистики: {e}")
-            return False
-
-    def load_keys_progress(self) -> bool:
-        """
-        Загружает цель и прогресс сбора ключей из файла.
-
-        Returns:
-            True if progress was successfully loaded, False otherwise
-        """
-        if not os.path.exists(self.keys_progress_file):
-            self.logger.info("Файл прогресса ключей не найден. Будет создан новый файл.")
-            return False
-
-        try:
-            with open(self.keys_progress_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            old_target = self.keys_target
-            old_current = self.keys_current
-
-            self.keys_target = data.get("target", 1000)
-            self.keys_current = data.get("current", 0)
-
-            self.logger.info(f"Загружен прогресс сбора ключей: {self.keys_current}/{self.keys_target} " +
-                             f"(было: {old_current}/{old_target})")
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при загрузке прогресса ключей: {e}")
-            return False
-
-    def save_keys_progress(self) -> bool:
-        """
-        Сохраняет цель и прогресс сбора ключей в файл.
-
-        Returns:
-            True if progress was successfully saved, False otherwise
-        """
-        try:
-            # Проверка значений перед сохранением
-            if not isinstance(self.keys_target, int) or self.keys_target <= 0:
-                self.logger.warning(f"Некорректное значение keys_target ({self.keys_target}), установлено 1000")
-                self.keys_target = 1000
-
-            if not isinstance(self.keys_current, int) or self.keys_current < 0:
-                self.logger.warning(f"Некорректное значение keys_current ({self.keys_current}), установлено 0")
-                self.keys_current = 0
-
-            # Формируем данные для сохранения
-            data = {
-                "target": self.keys_target,
-                "current": self.keys_current,
-                "last_updated": datetime.datetime.now().isoformat()
-            }
-
-            # Сохраняем через временный файл для безопасности
-            temp_file = f"{self.keys_progress_file}.tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
-
-            # Если временный файл успешно создан, переименовываем его
-            import os
-            if os.path.exists(self.keys_progress_file):
-                # Создаем резервную копию текущего файла
-                backup_file = f"{self.keys_progress_file}.bak"
-                try:
-                    import shutil
-                    shutil.copy2(self.keys_progress_file, backup_file)
-                except Exception as backup_e:
-                    self.logger.warning(f"Не удалось создать резервную копию: {backup_e}")
-
-            # Переименовываем временный файл в целевой
-            os.replace(temp_file, self.keys_progress_file)
-
-            self.logger.info(f"Прогресс сбора ключей успешно сохранен: {self.keys_current}/{self.keys_target}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при сохранении прогресса ключей: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            return False
-
-    def save_stats(self) -> bool:
-        """
-        Save statistics to file.
-
-        Returns:
-            True if statistics were successfully saved, False otherwise
-        """
-        try:
-            # Calculate total stats from history
-            total_stats = self.get_total_stats()
-
-            # Prepare data for saving
-            data = {
-                "total": total_stats,
-                "history": self.history,
-                "last_updated": datetime.datetime.now().isoformat()
-            }
-
-            # Save to file safely using a temporary file
-            temp_file = f"{self.stats_file}.tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
-
-            # Create a backup of the current file if it exists
-            if os.path.exists(self.stats_file):
-                backup_file = f"{self.stats_file}.bak"
-                try:
-                    import shutil
-                    shutil.copy2(self.stats_file, backup_file)
-                except Exception as backup_e:
-                    self.logger.warning(f"Не удалось создать резервную копию статистики: {backup_e}")
-
-            # Replace the original file with the temporary file
-            os.replace(temp_file, self.stats_file)
-
-            self.logger.info("Статистика успешно сохранена.")
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при сохранении статистики: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            return False
-
-    def register_session(self, session_stats: Dict[str, int], start_time: float, end_time: float,
-                         duration_seconds: float) -> bool:
-        """
-        Регистрирует сессию бота в истории и обновляет общий прогресс ключей.
-
-        Args:
-            session_stats: Статистика сессии
-            start_time: Время начала сессии (timestamp)
-            end_time: Время окончания сессии (timestamp)
-            duration_seconds: Длительность сессии в секундах
-
-        Returns:
-            True if session was successfully registered, False otherwise
-        """
-        try:
-            # Проверяем наличие статистики
-            if not session_stats:
-                self.logger.warning("Попытка зарегистрировать пустую сессию")
-                return False
-
-            # Преобразуем timestamp в datetime
-            start_datetime = datetime.datetime.fromtimestamp(start_time) if start_time else datetime.datetime.now()
-            end_datetime = datetime.datetime.fromtimestamp(end_time) if end_time else datetime.datetime.now()
-
-            # Создаем запись о сессии
-            session_record = {
-                "start_time": start_datetime.isoformat(),
-                "end_time": end_datetime.isoformat(),
-                "duration_seconds": duration_seconds,
-                "stats": session_stats.copy()  # Копируем, чтобы избежать проблем с изменением оригинала
-            }
-
-            # Добавляем в историю
-            self.history.append(session_record)
-
-            # Добавляем ключи к общему прогрессу
-            keys_collected = session_stats.get("keys_collected", 0)
-            if keys_collected > 0:
-                self.logger.info(f"Добавляем {keys_collected} ключей к общему прогрессу ({self.keys_current})")
-                self.keys_current += keys_collected
-                self.logger.info(f"Новое значение общего прогресса: {self.keys_current}")
-
-                # Сохраняем прогресс ключей
-                self.save_keys_progress()
-
-            # Сохраняем обновленную статистику
-            self.save_stats()
-
-            self.logger.info(
-                f"Сессия успешно зарегистрирована. Общий прогресс ключей: {self.keys_current}/{self.keys_target}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при регистрации сессии: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            return False
-
-    def update_keys_target(self, target: int) -> bool:
-        """
-        Обновляет целевое значение прогресса ключей.
-
-        Args:
-            target: Новое целевое значение
-
-        Returns:
-            True if target was successfully updated, False otherwise
-        """
-        try:
-            # Проверяем корректность значения
-            if not isinstance(target, int) or target <= 0:
-                self.logger.warning(f"Некорректное значение цели: {target}")
-                return False
-
-            # Сохраняем старое значение для логирования
-            old_target = self.keys_target
-
-            # Обновляем цель
-            self.keys_target = target
-
-            # Сохраняем изменения
-            self.save_keys_progress()
-
-            self.logger.info(f"Цель по ключам обновлена: {old_target} -> {self.keys_target}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при обновлении цели по ключам: {e}")
-            return False
-
-    def add_keys_to_progress(self, keys_count: int) -> int:
-        """
-        Добавляет указанное количество ключей к общему прогрессу.
-
-        Args:
-            keys_count: Количество ключей для добавления
-
-        Returns:
-            Обновленное значение прогресса ключей
-        """
-        try:
-            if keys_count <= 0:
-                return self.keys_current
-
-            # Обновляем прогресс
-            self.keys_current += keys_count
-
-            # Сохраняем изменения
-            self.save_keys_progress()
-
-            self.logger.info(f"Добавлено {keys_count} ключей к общему прогрессу. Текущее значение: {self.keys_current}")
-            return self.keys_current
-        except Exception as e:
-            self.logger.error(f"Ошибка при добавлении ключей к прогрессу: {e}")
-            return self.keys_current
-
-    def reset_keys_progress(self) -> bool:
-        """
-        Сбрасывает прогресс сбора ключей.
-
-        Returns:
-            True if progress was successfully reset, False otherwise
-        """
-        try:
-            # Сохраняем старое значение для логирования
-            old_progress = self.keys_current
-
-            # Сбрасываем прогресс
+        if not isinstance(self.keys_current, int) or self.keys_current < 0:
+            self.logger.warning(f"Некорректный прогресс ключей ({self.keys_current}), установлено 0")
             self.keys_current = 0
 
-            # Сохраняем изменения
-            self.save_keys_progress()
-
-            self.logger.info(f"Прогресс ключей сброшен: {old_progress} -> 0")
+    # Методы загрузки/сохранения
+    def load_stats(self) -> bool:
+        """Загружает статистику из файла."""
+        stats_data = self.file_manager.safe_load(self.stats_file)
+        if stats_data:
+            self.history = stats_data.get("history", [])
+            self.logger.info(f"Загружено {len(self.history)} записей истории")
             return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при сбросе прогресса ключей: {e}")
+        return False
+
+    def save_stats(self) -> bool:
+        """Сохраняет статистику в файл."""
+        data = {
+            "total": self.get_total_stats(),
+            "history": self.history
+        }
+        return self.file_manager.safe_save(self.stats_file, data)
+
+    def load_keys_progress(self) -> bool:
+        """Загружает прогресс ключей."""
+        keys_data = self.file_manager.safe_load(self.keys_progress_file)
+        if keys_data:
+            old_target, old_current = self.keys_target, self.keys_current
+            self.keys_target = keys_data.get("target", 1000)
+            self.keys_current = keys_data.get("current", 0)
+            self._validate_keys_data()
+
+            self.logger.info(f"Загружен прогресс: {self.keys_current}/{self.keys_target} "
+                             f"(было: {old_current}/{old_target})")
+            return True
+        return False
+
+    def save_keys_progress(self) -> bool:
+        """Сохраняет прогресс ключей."""
+        self._validate_keys_data()
+        data = {
+            "target": self.keys_target,
+            "current": self.keys_current
+        }
+        success = self.file_manager.safe_save(self.keys_progress_file, data)
+        if success:
+            self.logger.info(f"Прогресс ключей сохранен: {self.keys_current}/{self.keys_target}")
+        return success
+
+    # Основные методы работы со статистикой
+    def register_session(self, session_stats: Dict[str, int], start_time: float,
+                         end_time: float, duration_seconds: float) -> bool:
+        """Регистрирует сессию в истории."""
+        if not session_stats:
+            self.logger.warning("Попытка зарегистрировать пустую сессию")
             return False
 
-    def get_total_stats(self) -> Dict[str, int]:
-        """
-        Calculate total statistics from all historical records.
-
-        Returns:
-            Dictionary with total statistics
-        """
-        # Определяем структуру статистики на основе последней записи
-        if self.history:
-            last_record = self.history[-1]
-            if "stats" in last_record:
-                total = {key: 0 for key in last_record["stats"]}
-            else:
-                total = {
-                    "battles_started": 0,
-                    "victories": 0,
-                    "defeats": 0,
-                    "connection_losses": 0,
-                    "errors": 0,
-                    "keys_collected": 0,
-                    "silver_collected": 0
-                }
-        else:
-            total = {
-                "battles_started": 0,
-                "victories": 0,
-                "defeats": 0,
-                "connection_losses": 0,
-                "errors": 0,
-                "keys_collected": 0,
-                "silver_collected": 0
+        try:
+            # Создаем запись сессии
+            session_record = {
+                "start_time": datetime.datetime.fromtimestamp(start_time).isoformat(),
+                "end_time": datetime.datetime.fromtimestamp(end_time).isoformat(),
+                "duration_seconds": duration_seconds,
+                "stats": session_stats.copy()
             }
 
-        # Add up all historical stats
+            self.history.append(session_record)
+
+            # Обновляем прогресс ключей
+            keys_collected = session_stats.get("keys_collected", 0)
+            if keys_collected > 0:
+                self.keys_current += keys_collected
+                self.save_keys_progress()
+
+            # Сохраняем статистику
+            success = self.save_stats()
+            if success:
+                self.logger.info(f"Сессия зарегистрирована. Прогресс: {self.keys_current}/{self.keys_target}")
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при регистрации сессии: {e}")
+            return False
+
+    @validate_stats_data
+    def get_total_stats(self) -> Dict[str, int]:
+        """Получает общую статистику из истории."""
+        if not self.history:
+            return self.DEFAULT_STATS.copy()
+
+        # Берем структуру из последней записи или используем дефолтную
+        template = self.history[-1].get("stats", self.DEFAULT_STATS)
+        total = {key: 0 for key in template}
+
+        # Суммируем все записи
         for record in self.history:
-            if "stats" in record:
-                for key, value in record["stats"].items():
-                    if key in total:
-                        total[key] += value
+            stats = record.get("stats", {})
+            for key, value in stats.items():
+                if key in total and isinstance(value, (int, float)):
+                    total[key] += value
 
         return total
 
-    def get_stats_by_period(self, period: str) -> Dict[str, Any]:
-        """
-        Get statistics aggregated by a specific time period.
-
-        Args:
-            period: Time period ("day", "week", "month", "all")
-
-        Returns:
-            Dictionary with aggregated statistics for the period
-        """
+    def get_stats_by_period(self, period: str, current_session_stats: Optional[Dict[str, int]] = None) -> Dict[
+        str, Any]:
+        """Универсальный метод получения статистики за период."""
+        # Определяем дату отсечения
         now = datetime.datetime.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff_dates = {
+            "day": now.replace(hour=0, minute=0, second=0, microsecond=0),
+            "week": now - datetime.timedelta(weeks=1),
+            "month": now - datetime.timedelta(days=30),
+            "all": datetime.datetime.min
+        }
+        cutoff = cutoff_dates.get(period, datetime.datetime.min)
 
-        # Define cutoff date based on period
-        if period == "day":
-            cutoff = today_start  # Начало текущего дня
-        elif period == "week":
-            cutoff = now - datetime.timedelta(weeks=1)
-        elif period == "month":
-            cutoff = now - datetime.timedelta(days=30)
-        else:  # "all" or any other value
-            cutoff = datetime.datetime.min
-
-        # Логируем выбранный период и дату отсечения
-        self.logger.debug(f"Агрегация статистики для периода: {period}, дата отсечения: {cutoff}")
-
-        # Filter history records by period
+        # Фильтруем записи
         filtered_records = []
         for record in self.history:
             try:
@@ -410,190 +296,135 @@ class StatsManager:
                 if end_time >= cutoff:
                     filtered_records.append(record)
             except (KeyError, ValueError) as e:
-                self.logger.warning(f"Ошибка обработки записи истории: {e}")
+                self.logger.warning(f"Ошибка обработки записи: {e}")
 
-        # Логируем количество отфильтрованных записей
-        self.logger.debug(f"Отфильтровано записей для периода {period}: {len(filtered_records)}")
+        # Агрегируем статистику
+        stats = self.DEFAULT_STATS.copy()
+        total_duration_hours = 0
 
-        # Aggregate stats
-        aggregated = {
+        for record in filtered_records:
+            # Суммируем длительность
+            total_duration_hours += record.get("duration_seconds", 0) / 3600
+
+            # Суммируем статистику
+            record_stats = record.get("stats", {})
+            for key, value in record_stats.items():
+                if key in stats and isinstance(value, (int, float)):
+                    stats[key] += value
+
+        # Добавляем текущую сессию если нужно
+        if current_session_stats:
+            stats = self.aggregator.merge_stats(stats, current_session_stats)
+
+        # Формируем результат
+        result = {
             "period": period,
             "record_count": len(filtered_records),
-            "total_duration_hours": 0,
-            "stats": {}
+            "total_duration_hours": total_duration_hours,
+            "stats": stats
         }
 
-        # Обязательно инициализируем все поля статистики, включая серебро
-        aggregated["stats"] = {
-            "battles_started": 0,
-            "victories": 0,
-            "defeats": 0,
-            "connection_losses": 0,
-            "errors": 0,
-            "keys_collected": 0,
-            "silver_collected": 0  # Всегда инициализируем поле серебра
-        }
+        # Добавляем производные показатели
+        derived = self.aggregator.calculate_derived_stats(stats)
+        result.update(derived)
 
-        # Add up stats from filtered records
-        for record in filtered_records:
-            if "duration_seconds" in record:
-                aggregated["total_duration_hours"] += record["duration_seconds"] / 3600
-
-            if "stats" in record:
-                # Проверяем наличие поля silver_collected в каждой записи
-                if "silver_collected" not in record["stats"]:
-                    self.logger.warning(
-                        f"Поле silver_collected отсутствует в записи от {record.get('end_time', 'неизвестная дата')}")
-                    # Добавляем поле серебра со значением 0, если его нет
-                    record["stats"]["silver_collected"] = 0
-
-                # Суммируем все статистические данные
-                for key, value in record["stats"].items():
-                    if key in aggregated["stats"]:
-                        # Проверка типа данных для предотвращения ошибок
-                        if isinstance(value, (int, float)) and isinstance(aggregated["stats"][key], (int, float)):
-                            aggregated["stats"][key] += value
-                        else:
-                            # Логируем проблему с типами данных
-                            self.logger.warning(
-                                f"Несовместимые типы данных для ключа {key}: {type(value)} и {type(aggregated['stats'][key])}")
-                            # Устанавливаем безопасное значение по умолчанию
-                            if key == "silver_collected":
-                                aggregated["stats"][key] = 0
-                    else:
-                        # Если ключ отсутствует в агрегированных данных, добавляем его
-                        aggregated["stats"][key] = value
-
-        # Проверяем наличие и тип поля серебра после агрегации
-        if "silver_collected" not in aggregated["stats"]:
-            self.logger.warning(f"После агрегации поле silver_collected отсутствует, добавляем со значением 0")
-            aggregated["stats"]["silver_collected"] = 0
-        elif not isinstance(aggregated["stats"]["silver_collected"], (int, float)):
-            self.logger.warning(
-                f"Некорректный тип данных silver_collected: {type(aggregated['stats']['silver_collected'])}")
-            aggregated["stats"]["silver_collected"] = 0
-
-        # Логируем агрегированные данные для отладки, особенно серебро
-        self.logger.debug(f"Агрегация для периода {period}: {len(filtered_records)} записей")
-        self.logger.debug(f"Агрегированная статистика: {aggregated['stats']}")
-        self.logger.debug(f"Серебро за период {period}: {aggregated['stats']['silver_collected']}")
-
-        # Calculate derived statistics
-        stats = aggregated["stats"]
-        battles = stats.get("victories", 0) + stats.get("defeats", 0)
-
-        if battles > 0:
-            aggregated["win_rate"] = (stats.get("victories", 0) / battles) * 100
+        # Добавляем временные метрики
+        if total_duration_hours > 0:
+            time_metrics = self.aggregator.calculate_time_metrics(total_duration_hours, stats)
+            result.update(time_metrics)
         else:
-            aggregated["win_rate"] = 0
+            result.update({"battles_per_hour": 0, "keys_per_hour": 0})
 
-        if stats.get("victories", 0) > 0:
-            aggregated["keys_per_victory"] = stats.get("keys_collected", 0) / stats.get("victories", 0)
-        else:
-            aggregated["keys_per_victory"] = 0
+        return result
 
-        if aggregated["total_duration_hours"] > 0:
-            aggregated["battles_per_hour"] = battles / aggregated["total_duration_hours"]
-            aggregated["keys_per_hour"] = stats.get("keys_collected", 0) / aggregated["total_duration_hours"]
-        else:
-            aggregated["battles_per_hour"] = 0
-            aggregated["keys_per_hour"] = 0
+    # Методы совместимости (делегируют к основному методу)
+    def get_stats_by_period_with_current_session(self, period: str,
+                                                 current_session_stats: Optional[Dict[str, int]]) -> Dict[str, Any]:
+        """Совместимость: получение статистики с текущей сессией."""
+        return self.get_stats_by_period(period, current_session_stats)
 
-        return aggregated
-
+    @validate_stats_data
     def get_daily_stats(self, days: int = 7) -> List[Dict[str, Any]]:
-        """
-        Get statistics broken down by day for the past N days.
-
-        Args:
-            days: Number of past days to include
-
-        Returns:
-            List of daily statistics dictionaries
-        """
+        """Получает статистику по дням."""
         daily_stats = []
-        # Используем current_date для однозначного определения текущей даты
         current_date = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Initialize empty data for each day
+        # Инициализируем пустые дни
         for i in range(days):
-            # Создаем дату, начиная с текущего дня (i=0) и назад
             date = current_date - datetime.timedelta(days=i)
             day_data = {
                 "date": date.strftime("%Y-%m-%d"),
                 "display_date": date.strftime("%d.%m"),
-                "stats": {
-                    "battles_started": 0,
-                    "victories": 0,
-                    "defeats": 0,
-                    "connection_losses": 0,
-                    "errors": 0,
-                    "keys_collected": 0,
-                    "silver_collected": 0
-                }
+                "stats": self.DEFAULT_STATS.copy()
             }
             daily_stats.append(day_data)
 
-        # Process history records
+        # Заполняем данными из истории
         for record in self.history:
             try:
-                # Преобразуем время окончания в объект datetime
                 end_time = datetime.datetime.fromisoformat(record["end_time"])
-
-                # Приводим к началу дня для корректного сравнения дат
                 end_date = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
-
-                # Считаем разницу в днях между текущей датой и датой записи
                 days_difference = (current_date - end_date).days
 
-                # Если запись попадает в запрашиваемый период
                 if 0 <= days_difference < days:
-                    day_index = days_difference
+                    record_stats = record.get("stats", {})
+                    for key, value in record_stats.items():
+                        if key in daily_stats[days_difference]["stats"]:
+                            daily_stats[days_difference]["stats"][key] += value
 
-                    # Add stats to the appropriate day
-                    for key, value in record["stats"].items():
-                        if key in daily_stats[day_index]["stats"]:
-                            daily_stats[day_index]["stats"][key] += value
             except (KeyError, ValueError) as e:
-                self.logger.warning(f"Ошибка обработки записи истории для разбивки по дням: {e}")
+                self.logger.warning(f"Ошибка обработки записи для дней: {e}")
 
-        # Calculate additional metrics for each day
+        # Добавляем производные показатели
         for day in daily_stats:
-            stats = day["stats"]
-            battles = stats["victories"] + stats["defeats"]
+            derived = self.aggregator.calculate_derived_stats(day["stats"])
+            day.update(derived)
 
-            if battles > 0:
-                day["win_rate"] = (stats["victories"] / battles) * 100
-            else:
-                day["win_rate"] = 0
-
-            if stats["victories"] > 0:
-                day["keys_per_victory"] = stats["keys_collected"] / stats["victories"]
-            else:
-                day["keys_per_victory"] = 0
-
-        # Reverse to get chronological order (oldest to newest)
+        # Возвращаем в хронологическом порядке
         daily_stats.reverse()
         return daily_stats
 
-    def get_trend_data(self) -> Dict[str, List]:
-        """
-        Get data formatted for trend visualization.
+    def get_daily_stats_with_current_session(self, days: int = 7,
+                                             current_session_stats: Optional[Dict[str, int]] = None) -> List[
+        Dict[str, Any]]:
+        """Получает ежедневную статистику с учетом текущей сессии."""
+        daily_stats = self.get_daily_stats(days)
 
-        Returns:
-            Dictionary with lists of data points for different metrics
-        """
-        # Get daily stats for the past 7 days in chronological order
+        if not current_session_stats:
+            return daily_stats
+
+        # Добавляем текущую сессию к сегодняшнему дню
+        today = datetime.datetime.now().strftime("%d.%m")
+
+        for day in daily_stats:
+            if day["display_date"] == today:
+                # Обновляем статистику сегодняшнего дня
+                day["stats"] = self.aggregator.merge_stats(day["stats"], current_session_stats)
+
+                # Пересчитываем производные показатели
+                derived = self.aggregator.calculate_derived_stats(day["stats"])
+                day.update(derived)
+                break
+        else:
+            # Если сегодня нет в данных, добавляем новый день
+            today_stats = {
+                "date": datetime.datetime.now().strftime("%Y-%m-%d"),
+                "display_date": today,
+                "stats": current_session_stats.copy()
+            }
+            derived = self.aggregator.calculate_derived_stats(today_stats["stats"])
+            today_stats.update(derived)
+            daily_stats.append(today_stats)
+
+        return daily_stats
+
+    def get_trend_data(self) -> Dict[str, List]:
+        """Получает данные для графиков трендов."""
         daily_data = self.get_daily_stats(7)
 
         trend_data = {
-            "dates": [],
-            "victories": [],
-            "defeats": [],
-            "win_rates": [],
-            "keys_collected": [],
-            "keys_per_victory": [],
-            "silver_collected": []
+            "dates": [], "victories": [], "defeats": [], "win_rates": [],
+            "keys_collected": [], "keys_per_victory": [], "silver_collected": []
         }
 
         for day in daily_data:
@@ -603,231 +434,103 @@ class StatsManager:
             trend_data["win_rates"].append(round(day.get("win_rate", 0), 1))
             trend_data["keys_collected"].append(day["stats"]["keys_collected"])
             trend_data["keys_per_victory"].append(round(day.get("keys_per_victory", 0), 1))
-            # Добавляем данные серебра
             trend_data["silver_collected"].append(day["stats"].get("silver_collected", 0))
 
         return trend_data
 
-    def get_keys_progress(self) -> Dict[str, int]:
-        """
-        Возвращает информацию о прогрессе сбора ключей.
+    def get_trend_data_with_current_session(self, current_session_stats: Optional[Dict[str, int]]) -> Dict[str, List]:
+        """Получает данные трендов с учетом текущей сессии."""
+        trend_data = self.get_trend_data()
 
-        Returns:
-            Dictionary with keys progress information
-        """
+        if not current_session_stats:
+            return trend_data
+
+        # Обновляем данные для сегодняшнего дня
+        today = datetime.datetime.now().strftime("%d.%m")
+
+        if trend_data["dates"] and trend_data["dates"][-1] == today:
+            # Обновляем последний день
+            index = len(trend_data["dates"]) - 1
+            trend_data["victories"][index] += current_session_stats.get("victories", 0)
+            trend_data["defeats"][index] += current_session_stats.get("defeats", 0)
+            trend_data["keys_collected"][index] += current_session_stats.get("keys_collected", 0)
+            trend_data["silver_collected"][index] += current_session_stats.get("silver_collected", 0)
+
+            # Пересчитываем производные показатели
+            victories = trend_data["victories"][index]
+            defeats = trend_data["defeats"][index]
+            battles = victories + defeats
+
+            if battles > 0:
+                trend_data["win_rates"][index] = round((victories / battles) * 100, 1)
+                trend_data["keys_per_victory"][index] = round(trend_data["keys_collected"][index] / victories,
+                                                              1) if victories > 0 else 0
+        else:
+            # Добавляем новый день
+            for key in trend_data:
+                if key == "dates":
+                    trend_data[key].append(today)
+                elif key in current_session_stats:
+                    trend_data[key].append(current_session_stats[key])
+                else:
+                    # Рассчитываем производные показатели
+                    victories = current_session_stats.get("victories", 0)
+                    defeats = current_session_stats.get("defeats", 0)
+                    battles = victories + defeats
+
+                    if key == "win_rates":
+                        trend_data[key].append(round((victories / battles) * 100, 1) if battles > 0 else 0)
+                    elif key == "keys_per_victory":
+                        trend_data[key].append(round(current_session_stats.get("keys_collected", 0) / victories,
+                                                     1) if victories > 0 else 0)
+                    else:
+                        trend_data[key].append(0)
+
+        return trend_data
+
+    # Методы работы с ключами
+    def update_keys_target(self, target: int) -> bool:
+        """Обновляет целевое значение ключей."""
+        if not isinstance(target, int) or target <= 0:
+            self.logger.warning(f"Некорректная цель ключей: {target}")
+            return False
+
+        old_target = self.keys_target
+        self.keys_target = target
+        success = self.save_keys_progress()
+
+        if success:
+            self.logger.info(f"Цель ключей обновлена: {old_target} -> {self.keys_target}")
+
+        return success
+
+    def add_keys_to_progress(self, keys_count: int) -> int:
+        """Добавляет ключи к общему прогрессу."""
+        if keys_count <= 0:
+            return self.keys_current
+
+        self.keys_current += keys_count
+        self.save_keys_progress()
+
+        self.logger.info(f"Добавлено {keys_count} ключей. Текущий прогресс: {self.keys_current}")
+        return self.keys_current
+
+    def reset_keys_progress(self) -> bool:
+        """Сбрасывает прогресс ключей."""
+        old_progress = self.keys_current
+        self.keys_current = 0
+        success = self.save_keys_progress()
+
+        if success:
+            self.logger.info(f"Прогресс ключей сброшен: {old_progress} -> 0")
+
+        return success
+
+    def get_keys_progress(self) -> Dict[str, int]:
+        """Возвращает информацию о прогрессе ключей."""
         return {
             "target": self.keys_target,
             "current": self.keys_current,
             "remaining": max(0, self.keys_target - self.keys_current),
             "percent": min(100, int((self.keys_current / self.keys_target) * 100)) if self.keys_target > 0 else 0
         }
-
-    def get_stats_by_period_with_current_session(self, period: str, current_session_stats: Dict[str, int]) -> Dict[
-        str, Any]:
-        """
-        Получает статистику за период, включая данные текущей сессии (не сохраненные).
-
-        Args:
-            period: Период ("day", "week", "month", "all")
-            current_session_stats: Статистика текущей сессии
-
-        Returns:
-            Словарь с агрегированной статистикой
-        """
-        # Получаем исторические данные
-        historical_stats = self.get_stats_by_period(period)
-
-        # Если нет данных текущей сессии, просто возвращаем исторические данные
-        if not current_session_stats:
-            return historical_stats
-
-        # Создаем глубокую копию исторических данных
-        import copy
-        result = copy.deepcopy(historical_stats)
-
-        # Добавляем данные текущей сессии к статистике периода
-        for key, value in current_session_stats.items():
-            if key in result["stats"]:
-                # Убедимся, что оба значения могут быть суммированы
-                if isinstance(value, (int, float)) and isinstance(result["stats"][key], (int, float)):
-                    result["stats"][key] += value
-                else:
-                    # Для несовместимых типов, логируем и пропускаем
-                    self.logger.warning(
-                        f"Несовместимые типы для ключа {key}: {type(value)} и {type(result['stats'][key])}")
-            else:
-                # Если ключа нет в исторических данных, добавляем его
-                result["stats"][key] = value
-
-        # Пересчитываем производные показатели
-        battles = result["stats"].get("victories", 0) + result["stats"].get("defeats", 0)
-
-        if battles > 0:
-            result["win_rate"] = (result["stats"].get("victories", 0) / battles) * 100
-        else:
-            result["win_rate"] = 0
-
-        if result["stats"].get("victories", 0) > 0:
-            result["keys_per_victory"] = result["stats"].get("keys_collected", 0) / result["stats"].get("victories", 0)
-        else:
-            result["keys_per_victory"] = 0
-
-        # Не пересчитываем показатели на час, так как данные о времени текущей сессии не переданы
-
-        return result
-
-    def get_trend_data_with_current_session(self, current_session_stats: Dict[str, int]) -> Dict[str, List]:
-        """
-        Получает данные для графиков трендов, включая текущую сессию.
-
-        Args:
-            current_session_stats: Статистика текущей сессии
-
-        Returns:
-            Словарь с данными для графиков
-        """
-        # Получаем базовые данные трендов
-        trend_data = self.get_trend_data()
-
-        # Если нет данных текущей сессии, просто возвращаем исторические тренды
-        if not current_session_stats:
-            return trend_data
-
-        # Проверяем, есть ли данные для сегодняшнего дня
-        import datetime
-        today = datetime.datetime.now().strftime("%d.%m")
-
-        if trend_data["dates"] and trend_data["dates"][-1] == today:
-            # Если данные на сегодня уже есть, добавляем к ним текущую сессию
-            index = len(trend_data["dates"]) - 1
-
-            # Обновляем данные побед
-            if "victories" in current_session_stats and index < len(trend_data["victories"]):
-                trend_data["victories"][index] += current_session_stats.get("victories", 0)
-
-            # Обновляем данные поражений
-            if "defeats" in current_session_stats and index < len(trend_data["defeats"]):
-                trend_data["defeats"][index] += current_session_stats.get("defeats", 0)
-
-            # Обновляем данные ключей
-            if "keys_collected" in current_session_stats and index < len(trend_data["keys_collected"]):
-                trend_data["keys_collected"][index] += current_session_stats.get("keys_collected", 0)
-
-            # Обновляем данные серебра
-            if "silver_collected" in current_session_stats and index < len(trend_data["silver_collected"]):
-                trend_data["silver_collected"][index] += current_session_stats.get("silver_collected", 0)
-
-            # Пересчитываем процент побед и ключей за победу
-            if index < len(trend_data["victories"]) and index < len(trend_data["defeats"]):
-                victories = trend_data["victories"][index]
-                defeats = trend_data["defeats"][index]
-                battles = victories + defeats
-
-                if battles > 0 and index < len(trend_data["win_rates"]):
-                    trend_data["win_rates"][index] = round((victories / battles) * 100, 1)
-
-                if victories > 0 and index < len(trend_data["keys_per_victory"]) and index < len(
-                        trend_data["keys_collected"]):
-                    trend_data["keys_per_victory"][index] = round(trend_data["keys_collected"][index] / victories, 1)
-        else:
-            # Если сегодняшнего дня нет в данных, добавляем новую запись
-            trend_data["dates"].append(today)
-            trend_data["victories"].append(current_session_stats.get("victories", 0))
-            trend_data["defeats"].append(current_session_stats.get("defeats", 0))
-            trend_data["keys_collected"].append(current_session_stats.get("keys_collected", 0))
-            trend_data["silver_collected"].append(current_session_stats.get("silver_collected", 0))
-
-            # Рассчитываем процент побед и ключей за победу
-            victories = current_session_stats.get("victories", 0)
-            defeats = current_session_stats.get("defeats", 0)
-            battles = victories + defeats
-
-            if battles > 0:
-                trend_data["win_rates"].append(round((victories / battles) * 100, 1))
-            else:
-                trend_data["win_rates"].append(0)
-
-            if victories > 0:
-                trend_data["keys_per_victory"].append(
-                    round(current_session_stats.get("keys_collected", 0) / victories, 1))
-            else:
-                trend_data["keys_per_victory"].append(0)
-
-        return trend_data
-
-    def get_daily_stats_with_current_session(self, days: int = 7, current_session_stats: Dict[str, int] = None) -> List[
-        Dict[str, Any]]:
-        """
-        Получает статистику по дням с учетом текущей сессии.
-
-        Args:
-            days: Количество дней
-            current_session_stats: Статистика текущей сессии
-
-        Returns:
-            Список словарей с ежедневной статистикой
-        """
-        # Получаем базовую статистику по дням
-        daily_stats = self.get_daily_stats(days)
-
-        # Если нет данных текущей сессии, просто возвращаем историческую статистику
-        if not current_session_stats:
-            return daily_stats
-
-        # Проверяем, есть ли данные за сегодня
-        import datetime
-        today = datetime.datetime.now().strftime("%Y-%m-%d")
-        today_display = datetime.datetime.now().strftime("%d.%m")
-
-        for day in daily_stats:
-            if day["display_date"] == today_display:
-                # Добавляем статистику текущей сессии к сегодняшнему дню
-                for key, value in current_session_stats.items():
-                    if key in day["stats"]:
-                        day["stats"][key] += value
-
-                # Пересчитываем win_rate и keys_per_victory
-                battles = day["stats"]["victories"] + day["stats"]["defeats"]
-                if battles > 0:
-                    day["win_rate"] = (day["stats"]["victories"] / battles) * 100
-                else:
-                    day["win_rate"] = 0
-
-                if day["stats"]["victories"] > 0:
-                    day["keys_per_victory"] = day["stats"]["keys_collected"] / day["stats"]["victories"]
-                else:
-                    day["keys_per_victory"] = 0
-
-                return daily_stats
-
-        # Если нет данных за сегодня, создаем новую запись
-        today_stats = {
-            "date": today,
-            "display_date": today_display,
-            "stats": {
-                "battles_started": current_session_stats.get("battles_started", 0),
-                "victories": current_session_stats.get("victories", 0),
-                "defeats": current_session_stats.get("defeats", 0),
-                "connection_losses": current_session_stats.get("connection_losses", 0),
-                "errors": current_session_stats.get("errors", 0),
-                "keys_collected": current_session_stats.get("keys_collected", 0),
-                "silver_collected": current_session_stats.get("silver_collected", 0)
-            }
-        }
-
-        # Рассчитываем win_rate и keys_per_victory
-        battles = today_stats["stats"]["victories"] + today_stats["stats"]["defeats"]
-        if battles > 0:
-            today_stats["win_rate"] = (today_stats["stats"]["victories"] / battles) * 100
-        else:
-            today_stats["win_rate"] = 0
-
-        if today_stats["stats"]["victories"] > 0:
-            today_stats["keys_per_victory"] = today_stats["stats"]["keys_collected"] / today_stats["stats"]["victories"]
-        else:
-            today_stats["keys_per_victory"] = 0
-
-        # Добавляем сегодняшний день в начало списка (так как список в хронологическом порядке)
-        daily_stats.append(today_stats)
-
-        return daily_stats
