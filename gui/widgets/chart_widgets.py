@@ -11,13 +11,68 @@ import logging
 from gui.styles import Styles
 
 
-class ResponsiveChartWidget(QWidget):
-    """Базовый класс для отзывчивых графиков."""
+class ChartConfig:
+    """Конфигурация для разных типов графиков."""
 
-    def __init__(self, title, parent=None):
+    BATTLES = {
+        'title': 'Тренд побед и поражений (7 дней)',
+        'chart_id': 'battles-chart',
+        'type': 'dual_bars',  # два столбца
+        'data_keys': ['victories', 'defeats'],
+        'colors': {
+            'primary': '#42E189',  # победы
+            'secondary': '#FF6B6C',  # поражения
+            'tooltip': '#42E189'
+        },
+        'legends': [
+            ('● Победы', Styles.COLORS['secondary']),
+            ('● Поражения', Styles.COLORS['accent'])
+        ],
+        'formatter': 'number',
+        'axis_step_func': 'calculateBattlesAxisStep'
+    }
+
+    KEYS = {
+        'title': 'Сбор ключей (7 дней)',
+        'chart_id': 'keys-chart',
+        'type': 'single_bar',  # один столбец
+        'data_keys': ['keys_collected'],
+        'colors': {
+            'primary': '#FFB169',
+            'tooltip': '#FFB169'
+        },
+        'legends': [
+            ('● Собрано ключей', Styles.COLORS['warning'])
+        ],
+        'formatter': 'number',
+        'axis_step_func': 'calculateKeysAxisStep'
+    }
+
+    SILVER = {
+        'title': 'Сбор серебра (7 дней)',
+        'chart_id': 'silver-chart',
+        'type': 'single_bar',
+        'data_keys': ['silver_collected'],
+        'colors': {
+            'primary': '#3FE0C8',
+            'tooltip': '#3FE0C8'
+        },
+        'legends': [
+            ('● Собрано серебра', Styles.COLORS['primary'])
+        ],
+        'formatter': 'silver',  # специальное форматирование
+        'axis_step_func': 'calculateSilverAxisStep'
+    }
+
+
+class ResponsiveChartWidget(QWidget):
+    """Базовый класс для отзывчивых графиков с общей логикой."""
+
+    def __init__(self, config, parent=None):
         super().__init__(parent)
         self._py_logger = logging.getLogger("BotLogger")
-        self.title = title
+        self.config = config
+        self.title = config['title']
 
         # Настройка лейаута
         self.layout = QVBoxLayout(self)
@@ -28,7 +83,7 @@ class ResponsiveChartWidget(QWidget):
         header_layout = QVBoxLayout()
         header_layout.setContentsMargins(15, 10, 15, 5)
 
-        self.title_label = QLabel(title)
+        self.title_label = QLabel(self.title)
         self.title_label.setObjectName("chart-title")
         self.title_label.setStyleSheet(f"""
             font-size: 14px;
@@ -40,7 +95,7 @@ class ResponsiveChartWidget(QWidget):
 
         self.layout.addLayout(header_layout)
 
-        # Контейнер для графика с более тёмным фоном
+        # Контейнер для графика
         self.chart_container = QFrame()
         self.chart_container.setObjectName("chart-container")
         self.chart_container.setMinimumHeight(250)
@@ -57,14 +112,11 @@ class ResponsiveChartWidget(QWidget):
 
         # Создание и настройка WebEngineView
         self.web_view = QWebEngineView()
-
-        # Настраиваем параметры браузера
         settings = self.web_view.page().settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
 
-        # Устанавливаем цвет фона соответствующий теме
         self.web_view.setStyleSheet(f"background-color: {Styles.COLORS['background_dark']};")
 
         chart_layout.addWidget(self.web_view)
@@ -74,13 +126,20 @@ class ResponsiveChartWidget(QWidget):
         self.legend_layout = QHBoxLayout()
         self.legend_layout.setContentsMargins(15, 5, 15, 10)
         self.legend_layout.addStretch()
+
+        # Добавляем легенды из конфигурации
+        for legend_text, color in config['legends']:
+            legend = QLabel(legend_text)
+            legend.setStyleSheet(f"color: {color}; font-size: 12px;")
+            self.legend_layout.addWidget(legend)
+
+        self.legend_layout.addStretch()
         self.layout.addLayout(self.legend_layout)
 
-        # ИСПРАВЛЕННАЯ ЛОГИКА УПРАВЛЕНИЯ АНИМАЦИЕЙ
         # Флаги для управления анимацией
-        self.should_animate_next = False  # Флаг для следующего обновления
-        self.is_tab_visible = False  # Видимость вкладки
-        self.has_animated_since_show = False  # Анимировали ли уже после показа
+        self.should_animate_next = False
+        self.is_tab_visible = False
+        self.has_animated_since_show = False
 
         # Временный HTML-файл для графика
         self.html_path = None
@@ -93,13 +152,600 @@ class ResponsiveChartWidget(QWidget):
         # Переменная для хранения последних данных
         self.last_data = None
 
-        # Создать базовый HTML шаблон
+        # Создать HTML шаблон
         self.create_html_template()
 
     def create_html_template(self):
-        """Создает HTML-шаблон с графиком."""
-        # Будет реализован в дочерних классах
-        pass
+        """Создает HTML-шаблон с универсальным графиком."""
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{self.config['title']}</title>
+            <style>
+                :root {{
+                    --bg-color: #171D33;
+                    --grid-color: #28304d;
+                    --text-color: #FFFFFF;
+                    --text-secondary: #9BA0BC;
+                    --primary-color: {self.config['colors']['primary']};
+                    --secondary-color: {self.config['colors'].get('secondary', self.config['colors']['primary'])};
+                    --tooltip-bg: #2A3158;
+                    --tooltip-border: #353E65;
+                }}
+
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
+
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    background-color: var(--bg-color);
+                    color: var(--text-color);
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    overflow: hidden;
+                    height: 100vh;
+                    width: 100vw;
+                }}
+
+                #chart-container {{
+                    width: 100%;
+                    height: 100%;
+                    position: relative;
+                }}
+
+                canvas {{
+                    width: 100%;
+                    height: 100%;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                }}
+
+                .tooltip {{
+                    position: absolute;
+                    display: none;
+                    background-color: var(--tooltip-bg);
+                    border: 1px solid var(--tooltip-border);
+                    border-radius: 4px;
+                    padding: 8px 12px;
+                    color: var(--text-color);
+                    font-size: 12px;
+                    pointer-events: none;
+                    z-index: 100;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                    transition: all 0.1s ease;
+                }}
+
+                .tooltip strong {{
+                    display: block;
+                    margin-bottom: 4px;
+                    color: var(--primary-color);
+                }}
+
+                .no-data {{
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    color: var(--text-secondary);
+                    font-size: 14px;
+                    text-align: center;
+                }}
+            </style>
+        </head>
+        <body>
+            <div id="chart-container">
+                <canvas id="{self.config['chart_id']}"></canvas>
+                <div id="tooltip" class="tooltip"></div>
+                <div id="no-data" class="no-data" style="display:none;">Нет данных для отображения</div>
+            </div>
+
+            <script>
+                // Конфигурация графика
+                const CONFIG = {json.dumps(self.config)};
+
+                // Данные будут добавлены динамически
+                const chartData = CHART_DATA_PLACEHOLDER;
+
+                // Настройки анимации
+                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
+                const ANIMATION_DURATION = 800;
+
+                // Объект для отслеживания состояния графика
+                const chartState = {{
+                    hoveredBar: null,
+                    tooltip: document.getElementById('tooltip'),
+                    noDataMessage: document.getElementById('no-data'),
+                    canvas: null,
+                    ctx: null,
+                    layout: {{
+                        padding: null,
+                        graphArea: {{ x: 0, y: 0, width: 0, height: 0 }}
+                    }},
+                    mouse: {{ x: 0, y: 0 }},
+                    bars: [],
+                    devicePixelRatio: window.devicePixelRatio || 1,
+                    animation: {{
+                        progress: 0,
+                        startTime: 0,
+                        isAnimating: false
+                    }}
+                }};
+
+                // Универсальные функции форматирования
+                const formatters = {{
+                    number: (num) => num.toLocaleString('ru-RU'),
+                    silver: (value) => {{
+                        if (value === null || value === undefined || value === 0) return "0K";
+                        if (value < 1) return value.toFixed(1).replace('.0', '') + "K";
+                        if (value < 1000) {{
+                            const formatted = value.toFixed(1);
+                            return formatted.endsWith('.0') ? Math.floor(value) + "K" : formatted + "K";
+                        }}
+                        if (value < 1000000) {{
+                            const millions = value / 1000;
+                            const formatted = millions.toFixed(1);
+                            return formatted.endsWith('.0') ? Math.floor(millions) + "млн" : formatted + "млн";
+                        }}
+                        if (value < 1000000000) {{
+                            const billions = value / 1000000;
+                            const formatted = billions.toFixed(1);
+                            return formatted.endsWith('.0') ? Math.floor(billions) + "млрд" : formatted + "млрд";
+                        }}
+                        const trillions = value / 1000000000;
+                        const formatted = trillions.toFixed(1);
+                        return formatted.endsWith('.0') ? Math.floor(trillions) + "трлн" : formatted + "трлн";
+                    }}
+                }};
+
+                // Функции для расчета шага оси
+                const axisStepFunctions = {{
+                    calculateBattlesAxisStep: (maxValue) => {{
+                        if (maxValue <= 5) return 1;
+                        if (maxValue <= 20) return 5;
+                        if (maxValue <= 50) return 10;
+                        if (maxValue <= 100) return 20;
+                        if (maxValue <= 500) return 100;
+                        const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+                        return Math.ceil(maxValue / 5 / magnitude) * magnitude;
+                    }},
+                    calculateKeysAxisStep: (maxValue) => {{
+                        if (maxValue <= 5) return 1;
+                        if (maxValue <= 20) return 5;
+                        if (maxValue <= 50) return 10;
+                        if (maxValue <= 100) return 20;
+                        if (maxValue <= 500) return 100;
+                        if (maxValue <= 1000) return 200;
+                        if (maxValue <= 5000) return 1000;
+                        if (maxValue <= 10000) return 2000;
+                        if (maxValue <= 50000) return 10000;
+                        const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+                        return Math.ceil(maxValue / 5 / magnitude) * magnitude;
+                    }},
+                    calculateSilverAxisStep: (maxValue) => {{
+                        if (maxValue <= 5) return 1;
+                        if (maxValue <= 10) return 2;
+                        if (maxValue <= 25) return 5;
+                        if (maxValue <= 50) return 10;
+                        if (maxValue <= 100) return 20;
+                        if (maxValue <= 200) return 50;
+                        if (maxValue <= 500) return 100;
+                        if (maxValue <= 1000) return 200;
+                        const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+                        return Math.ceil(maxValue / 5 / magnitude) * magnitude;
+                    }}
+                }};
+
+                function getOptimalFontSize() {{
+                    const canvas = chartState.canvas;
+                    if (!canvas) return 10;
+                    const width = canvas.clientWidth;
+                    if (width < 400) return 8;
+                    if (width < 600) return 9;
+                    return 10;
+                }}
+
+                function calculateOptimalPadding() {{
+                    const canvas = chartState.canvas;
+                    const width = canvas.clientWidth;
+                    const height = canvas.clientHeight;
+
+                    return {{
+                        left: Math.max(40, width * 0.06),
+                        right: Math.max(20, width * 0.03),
+                        top: Math.max(15, height * 0.06),
+                        bottom: Math.max(25, height * 0.1)
+                    }};
+                }}
+
+                function drawChart(animationProgress = 1) {{
+                    const canvas = document.getElementById(CONFIG.chart_id);
+                    const ctx = canvas.getContext('2d');
+
+                    chartState.canvas = canvas;
+                    chartState.ctx = ctx;
+
+                    const dpr = chartState.devicePixelRatio;
+                    const rect = canvas.getBoundingClientRect();
+
+                    canvas.width = rect.width * dpr;
+                    canvas.height = rect.height * dpr;
+                    ctx.scale(dpr, dpr);
+                    canvas.style.width = rect.width + 'px';
+                    canvas.style.height = rect.height + 'px';
+
+                    if (!chartData || !chartData.dates || chartData.dates.length === 0) {{
+                        chartState.noDataMessage.style.display = 'block';
+                        return;
+                    }} else {{
+                        chartState.noDataMessage.style.display = 'none';
+                    }}
+
+                    chartState.layout.padding = calculateOptimalPadding();
+                    const padding = chartState.layout.padding;
+
+                    const graphWidth = rect.width - padding.left - padding.right;
+                    const graphHeight = rect.height - padding.top - padding.bottom;
+
+                    chartState.layout.graphArea = {{
+                        x: padding.left,
+                        y: padding.top,
+                        width: graphWidth,
+                        height: graphHeight
+                    }};
+
+                    ctx.clearRect(0, 0, rect.width, rect.height);
+
+                    // Находим максимальные значения
+                    let maxValue = 0;
+                    CONFIG.data_keys.forEach(key => {{
+                        if (chartData[key]) {{
+                            chartData[key].forEach(value => {{
+                                maxValue = Math.max(maxValue, value || 0);
+                            }});
+                        }}
+                    }});
+
+                    // Для графика боев суммируем победы и поражения
+                    if (CONFIG.type === 'dual_bars') {{
+                        maxValue = 0;
+                        for (let i = 0; i < chartData.dates.length; i++) {{
+                            const total = (chartData.victories[i] || 0) + (chartData.defeats[i] || 0);
+                            maxValue = Math.max(maxValue, total);
+                        }}
+                    }}
+
+                    maxValue = maxValue || 10;
+
+                    drawAxes(ctx, padding, graphWidth, graphHeight, maxValue, rect.width, rect.height);
+                    chartState.bars = [];
+                    drawBars(ctx, padding, graphWidth, graphHeight, maxValue, rect.width, rect.height, animationProgress);
+                }}
+
+                function drawAxes(ctx, padding, graphWidth, graphHeight, maxValue, canvasWidth, canvasHeight) {{
+                    const baselineY = canvasHeight - padding.bottom;
+                    const baselineX = padding.left;
+                    const fontSize = getOptimalFontSize();
+
+                    // Фон области графика
+                    ctx.fillStyle = 'rgba(20, 26, 47, 0.5)';
+                    ctx.fillRect(padding.left, padding.top, graphWidth, graphHeight);
+
+                    // Сетка
+                    ctx.strokeStyle = 'rgba(40, 48, 77, 0.8)';
+                    ctx.lineWidth = 0.8;
+                    ctx.beginPath();
+
+                    // Шаг оси
+                    const stepFunc = axisStepFunctions[CONFIG.axis_step_func];
+                    const step = stepFunc(maxValue);
+                    const numLines = Math.floor(maxValue / step) + 1;
+
+                    // Горизонтальные линии
+                    for (let i = 0; i < numLines; i++) {{
+                        const value = i * step;
+                        const y = baselineY - (value / maxValue) * graphHeight;
+
+                        ctx.moveTo(baselineX, y);
+                        ctx.lineTo(baselineX + graphWidth, y);
+
+                        if (canvasWidth > 300) {{
+                            ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
+                            ctx.font = `${{fontSize}}px Arial`;
+                            ctx.textAlign = 'right';
+                            ctx.textBaseline = 'middle';
+                            const formatter = formatters[CONFIG.formatter];
+                            ctx.fillText(formatter(value), baselineX - 5, y);
+                        }}
+                    }}
+
+                    // Вертикальные линии и даты
+                    const dataLength = chartData.dates.length;
+                    const availableWidth = graphWidth / dataLength;
+                    let skipFactor = 1;
+                    if (availableWidth < 50) skipFactor = 2;
+                    if (availableWidth < 30) skipFactor = 3;
+
+                    for (let i = 0; i < dataLength; i++) {{
+                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
+
+                        ctx.moveTo(x, padding.top);
+                        ctx.lineTo(x, baselineY);
+
+                        if (i % skipFactor === 0 || i === dataLength - 1) {{
+                            ctx.fillStyle = 'rgba(155, 160, 188, 0.9)';
+                            ctx.font = `${{fontSize}}px Arial`;
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'top';
+                            ctx.fillText(chartData.dates[i], x, baselineY + 5);
+                        }}
+                    }}
+
+                    ctx.stroke();
+
+                    // Базовая линия
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'rgba(155, 160, 188, 0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.moveTo(padding.left, baselineY);
+                    ctx.lineTo(padding.left + graphWidth, baselineY);
+                    ctx.stroke();
+                }}
+
+                function drawBars(ctx, padding, graphWidth, graphHeight, maxValue, canvasWidth, canvasHeight, animationProgress) {{
+                    const baselineY = canvasHeight - padding.bottom;
+                    const dataLength = chartData.dates.length;
+
+                    if (CONFIG.type === 'dual_bars') {{
+                        drawDualBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress);
+                    }} else {{
+                        drawSingleBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress);
+                    }}
+                }}
+
+                function drawDualBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress) {{
+                    const maxBarWidth = 40;
+                    let barWidth = Math.min((graphWidth / dataLength) * 0.7, maxBarWidth);
+                    const barGap = Math.max(1, Math.min(2, barWidth * 0.1));
+                    const halfBarWidth = barWidth / 2;
+                    const singleBarWidth = (barWidth - barGap) / 2;
+
+                    for (let i = 0; i < dataLength; i++) {{
+                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
+                        const barX = x - halfBarWidth;
+
+                        const victories = chartData.victories[i] || 0;
+                        const defeats = chartData.defeats[i] || 0;
+
+                        const victoryHeight = (victories / maxValue) * graphHeight * animationProgress;
+                        const defeatHeight = (defeats / maxValue) * graphHeight * animationProgress;
+
+                        // Столбец побед
+                        const victoryGradient = ctx.createLinearGradient(0, baselineY - victoryHeight, 0, baselineY);
+                        victoryGradient.addColorStop(0, 'rgba(66, 225, 137, 1)');
+                        victoryGradient.addColorStop(1, 'rgba(66, 225, 137, 0.7)');
+
+                        ctx.fillStyle = victoryGradient;
+                        const victoryRect = {{
+                            x: barX,
+                            y: baselineY - victoryHeight,
+                            width: singleBarWidth,
+                            height: Math.max(1, victoryHeight),
+                            type: 'victory',
+                            value: victories,
+                            date: chartData.dates[i],
+                            index: i
+                        }};
+
+                        drawRoundedBar(ctx, victoryRect);
+                        chartState.bars.push(victoryRect);
+
+                        // Столбец поражений
+                        const defeatGradient = ctx.createLinearGradient(0, baselineY - defeatHeight, 0, baselineY);
+                        defeatGradient.addColorStop(0, 'rgba(255, 107, 108, 1)');
+                        defeatGradient.addColorStop(1, 'rgba(255, 107, 108, 0.7)');
+
+                        ctx.fillStyle = defeatGradient;
+                        const defeatRect = {{
+                            x: barX + singleBarWidth + barGap,
+                            y: baselineY - defeatHeight,
+                            width: singleBarWidth,
+                            height: Math.max(1, defeatHeight),
+                            type: 'defeat',
+                            value: defeats,
+                            date: chartData.dates[i],
+                            index: i
+                        }};
+
+                        drawRoundedBar(ctx, defeatRect);
+                        chartState.bars.push(defeatRect);
+                    }}
+                }}
+
+                function drawSingleBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress) {{
+                    const maxBarWidth = 60;
+                    let barWidth = Math.min((graphWidth / dataLength) * 0.8, maxBarWidth);
+                    const dataKey = CONFIG.data_keys[0];
+
+                    // Создаем градиент
+                    const primaryColor = CONFIG.colors.primary;
+                    const rgbColor = hexToRgb(primaryColor);
+
+                    for (let i = 0; i < dataLength; i++) {{
+                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
+                        const barX = x - (barWidth / 2);
+
+                        const value = chartData[dataKey][i] || 0;
+                        const barHeight = (value / maxValue) * graphHeight * animationProgress;
+
+                        const gradient = ctx.createLinearGradient(0, baselineY - barHeight, 0, baselineY);
+                        gradient.addColorStop(0, `rgba(${{rgbColor.r}}, ${{rgbColor.g}}, ${{rgbColor.b}}, 1)`);
+                        gradient.addColorStop(1, `rgba(${{rgbColor.r}}, ${{rgbColor.g}}, ${{rgbColor.b}}, 0.7)`);
+
+                        ctx.fillStyle = gradient;
+                        const rect = {{
+                            x: barX,
+                            y: baselineY - barHeight,
+                            width: barWidth,
+                            height: Math.max(1, barHeight),
+                            value: value,
+                            date: chartData.dates[i],
+                            index: i
+                        }};
+
+                        drawRoundedBar(ctx, rect);
+
+                        // Добавляем блик
+                        const highlightWidth = barWidth * 0.4;
+                        const highlightGradient = ctx.createLinearGradient(
+                            rect.x + barWidth * 0.3, rect.y,
+                            rect.x + barWidth * 0.3 + highlightWidth, rect.y
+                        );
+                        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+                        highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                        ctx.fillStyle = highlightGradient;
+                        ctx.beginPath();
+                        ctx.rect(rect.x + barWidth * 0.3, rect.y, highlightWidth, rect.height);
+                        ctx.fill();
+
+                        chartState.bars.push(rect);
+                    }}
+                }}
+
+                function drawRoundedBar(ctx, rect) {{
+                    const radius = Math.min(3, rect.width / 4);
+
+                    ctx.beginPath();
+                    ctx.moveTo(rect.x + radius, rect.y);
+                    ctx.lineTo(rect.x + rect.width - radius, rect.y);
+                    ctx.quadraticCurveTo(rect.x + rect.width, rect.y, rect.x + rect.width, rect.y + radius);
+                    ctx.lineTo(rect.x + rect.width, rect.y + rect.height);
+                    ctx.lineTo(rect.x, rect.y + rect.height);
+                    ctx.lineTo(rect.x, rect.y + radius);
+                    ctx.quadraticCurveTo(rect.x, rect.y, rect.x + radius, rect.y);
+                    ctx.closePath();
+                    ctx.fill();
+                }}
+
+                function hexToRgb(hex) {{
+                    const result = /^#?([a-f\\d]{{2}})([a-f\\d]{{2}})([a-f\\d]{{2}})$/i.exec(hex);
+                    return result ? {{
+                        r: parseInt(result[1], 16),
+                        g: parseInt(result[2], 16),
+                        b: parseInt(result[3], 16)
+                    }} : {{r: 255, g: 255, b: 255}};
+                }}
+
+                function checkForInteractions(event) {{
+                    const canvas = chartState.canvas;
+                    const rect = canvas.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+
+                    chartState.mouse = {{ x, y }};
+
+                    let hoveredBar = null;
+                    for (const bar of chartState.bars) {{
+                        if (x >= bar.x && x <= bar.x + bar.width && y >= bar.y && y <= bar.y + bar.height) {{
+                            hoveredBar = bar;
+                            break;
+                        }}
+                    }}
+
+                    if (hoveredBar) {{
+                        const tooltip = chartState.tooltip;
+                        tooltip.style.display = 'block';
+
+                        let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
+                        let tooltipY = Math.max(y - 10, 10);
+
+                        if (y > canvas.clientHeight - 80) {{
+                            tooltipY = y - 70;
+                        }}
+
+                        tooltip.style.left = tooltipX + 'px';
+                        tooltip.style.top = tooltipY + 'px';
+
+                        const formatter = formatters[CONFIG.formatter];
+                        const valueText = formatter(hoveredBar.value);
+
+                        if (CONFIG.type === 'dual_bars') {{
+                            const typeText = hoveredBar.type === 'victory' ? 'Победы' : 'Поражения';
+                            tooltip.innerHTML = `<strong>${{hoveredBar.date}}</strong>${{typeText}}: ${{valueText}}`;
+                        }} else {{
+                            const label = CONFIG.data_keys[0] === 'keys_collected' ? 'Собрано ключей' : 'Собрано серебра';
+                            tooltip.innerHTML = `<strong>${{hoveredBar.date}}</strong>${{label}}: ${{valueText}}`;
+                        }}
+                    }} else {{
+                        chartState.tooltip.style.display = 'none';
+                    }}
+
+                    chartState.hoveredBar = hoveredBar;
+                }}
+
+                function animateChart(timestamp) {{
+                    if (!chartState.animation.isAnimating) return;
+
+                    if (!chartState.animation.startTime) {{
+                        chartState.animation.startTime = timestamp;
+                    }}
+
+                    const elapsed = timestamp - chartState.animation.startTime;
+                    let progress = Math.min(1, elapsed / ANIMATION_DURATION);
+                    const animationProgress = 1 - Math.pow(1 - progress, 3);
+
+                    drawChart(animationProgress);
+
+                    if (progress < 1) {{
+                        requestAnimationFrame(animateChart);
+                    }} else {{
+                        chartState.animation.isAnimating = false;
+                    }}
+                }}
+
+                function setupEventListeners() {{
+                    const canvas = document.getElementById(CONFIG.chart_id);
+
+                    canvas.addEventListener('mousemove', checkForInteractions);
+                    canvas.addEventListener('mouseleave', function() {{
+                        chartState.tooltip.style.display = 'none';
+                    }});
+
+                    window.addEventListener('resize', function() {{
+                        drawChart(1);
+                    }});
+                }}
+
+                window.onload = function() {{
+                    setupEventListeners();
+
+                    if (ENABLE_ANIMATIONS) {{
+                        chartState.animation.isAnimating = true;
+                        requestAnimationFrame(animateChart);
+                    }} else {{
+                        drawChart(1);
+                    }}
+                }};
+            </script>
+        </body>
+        </html>
+        """
+
+        try:
+            fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix=f"aom_{self.config['type']}_chart_")
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+
+            self._py_logger.debug(f"Создан шаблон графика {self.title}: {self.html_path}")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при создании HTML-шаблона: {e}")
 
     def resizeEvent(self, event):
         """Обработчик изменения размера виджета."""
@@ -114,7 +760,6 @@ class ResponsiveChartWidget(QWidget):
         if hasattr(self, 'last_data') and self.last_data:
             self._is_currently_updating = True
             try:
-                # При изменении размера ВСЕГДА без анимации
                 self.update_chart(self.last_data, force_no_animation=True)
             finally:
                 self._is_currently_updating = False
@@ -122,10 +767,7 @@ class ResponsiveChartWidget(QWidget):
     def showEvent(self, event):
         """Обработчик события показа виджета."""
         super().showEvent(event)
-
         self.is_tab_visible = True
-
-        # ИСПРАВЛЕНО: При показе вкладки разрешаем анимацию для СЛЕДУЮЩЕГО обновления
         if not self.has_animated_since_show:
             self.should_animate_next = True
             self._py_logger.debug(f"График {self.title}: разрешена анимация для следующего обновления")
@@ -133,1924 +775,102 @@ class ResponsiveChartWidget(QWidget):
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""
         super().hideEvent(event)
-
         self.is_tab_visible = False
-
-        # При скрытии сбрасываем флаг анимации, чтобы при следующем показе снова анимировать
         self.has_animated_since_show = False
         self._py_logger.debug(f"График {self.title}: сброшен флаг анимации при скрытии")
 
     def should_animate(self, force_no_animation=False):
-        """
-        Определяет, нужно ли включать анимацию для текущего обновления.
-
-        Args:
-            force_no_animation (bool): Принудительно отключить анимацию
-
-        Returns:
-            bool: True если нужна анимация, False если нет
-        """
+        """Определяет, нужно ли включать анимацию для текущего обновления."""
         if force_no_animation:
             return False
 
-        # ИСПРАВЛЕНО: Анимация только если разрешена и вкладка видима
         if self.should_animate_next and self.is_tab_visible:
-            # Отключаем анимацию для последующих обновлений
             self.should_animate_next = False
             self.has_animated_since_show = True
-
             self._py_logger.debug(f"График {self.title}: включена анимация")
             return True
 
         return False
 
     def update_chart(self, data, force_no_animation=False):
-        """
-        Обновляет график новыми данными.
-
-        Args:
-            data: Данные для графика
-            force_no_animation (bool): Принудительно отключить анимацию
-        """
-        if not data:
+        """Обновляет график новыми данными."""
+        if not data or not self.html_path:
+            self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
             return
 
-        # Сохраняем данные для возможной перерисовки
-        self.last_data = data
+        try:
+            self.last_data = data
+            enable_animation = self.should_animate(force_no_animation)
 
-        animation_enabled = self.should_animate(force_no_animation)
-        animation_status = "с анимацией" if animation_enabled else "без анимации"
+            # Чтение и обновление HTML
+            with open(self.html_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
 
-        self._py_logger.debug(
-            f"График {self.title}: обновление {animation_status}, точек данных: {len(data.get('dates', []))}")
+            # Проверка данных
+            if not data.get("dates") or len(data.get("dates", [])) == 0:
+                self._py_logger.warning(f"Пустой набор данных для графика {self.title}")
+                data = {"dates": []}
+                for key in self.config['data_keys']:
+                    data[key] = []
+
+            # Замена плейсхолдеров
+            json_data = json.dumps(data)
+            updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
+            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER',
+                                                'true' if enable_animation else 'false')
+
+            # Запись и загрузка
+            with open(self.html_path, 'w', encoding='utf-8') as f:
+                f.write(updated_html)
+
+            if enable_animation:
+                try:
+                    self.web_view.page().profile().clearHttpCache()
+                except Exception:
+                    pass
+
+            self.web_view.load(QUrl.fromLocalFile(self.html_path))
+
+            animation_status = "с анимацией" if enable_animation else "без анимации"
+            self._py_logger.debug(
+                f"График {self.title} обновлен {animation_status}, точек данных: {len(data.get('dates', []))}")
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при обновлении графика {self.title}: {e}")
 
     def clear(self):
         """Очищает график."""
-        # Будет реализован в дочерних классах
-        pass
+        empty_data = {"dates": []}
+        for key in self.config['data_keys']:
+            empty_data[key] = []
+        self.update_chart(empty_data)
 
     def __del__(self):
         """Очистка ресурсов при уничтожении объекта."""
         try:
             if self.html_path and os.path.exists(self.html_path):
                 os.remove(self.html_path)
-        except Exception as e:
-            if hasattr(self, '_py_logger'):
-                self._py_logger.error(f"Ошибка при удалении временного файла: {e}")
-
-    def clear_cache(self, preserve_animation_state=False):
-        """
-        Очищает кэш и создает новый HTML-шаблон для принудительного обновления графика.
-
-        Args:
-            preserve_animation_state (bool): Сохранить текущее состояние анимации
-        """
-        try:
-            # Удаляем старый файл HTML, если он существует
-            if self.html_path and os.path.exists(self.html_path):
-                os.remove(self.html_path)
-                self._py_logger.debug(f"Удален временный файл шаблона: {self.html_path}")
-
-            # Создаем новый шаблон
-            self.create_html_template()
-            self._py_logger.debug("Создан новый HTML-шаблон для графика")
-
-            # Управляем состоянием анимации
-            if not preserve_animation_state:
-                # Только если явно не просят сохранить состояние, разрешаем анимацию
-                # (это происходит при переходе на вкладку)
-                self.first_update_after_show = True
-                self._py_logger.debug("Состояние анимации сброшено для следующего обновления")
-
-            # Сбрасываем сохраненные данные только если не сохраняем состояние
-            if not preserve_animation_state:
-                self.last_data = None
-
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при очистке кэша графика: {e}")
+        except Exception:
+            pass
 
 
+# Конкретные реализации графиков
 class BattlesChartWidget(ResponsiveChartWidget):
     """Виджет для отображения графика побед и поражений."""
 
     def __init__(self, parent=None):
-        super().__init__("Тренд побед и поражений (7 дней)", parent)
-
-        # Настройка легенды
-        victory_legend = QLabel("● Победы")
-        victory_legend.setStyleSheet(f"color: {Styles.COLORS['secondary']}; font-size: 12px;")
-        self.legend_layout.addWidget(victory_legend)
-
-        defeat_legend = QLabel("● Поражения")
-        defeat_legend.setStyleSheet(f"color: {Styles.COLORS['accent']}; font-size: 12px;")
-        self.legend_layout.addWidget(defeat_legend)
-
-        self.legend_layout.addStretch()
-
-    def create_html_template(self):
-        """Создает HTML-шаблон с улучшенным Canvas-графиком."""
-        html_content = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Battles Chart</title>
-            <style>
-                :root {
-                    --bg-color: #171D33;
-                    --grid-color: #28304d;
-                    --text-color: #FFFFFF;
-                    --text-secondary: #9BA0BC;
-                    --victory-color: #42E189;
-                    --defeat-color: #FF6B6C;
-                    --tooltip-bg: #2A3158;
-                    --tooltip-border: #353E65;
-                }
-
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
-
-                body {
-                    margin: 0;
-                    padding: 0;
-                    background-color: var(--bg-color);
-                    color: var(--text-color);
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    overflow: hidden;
-                    height: 100vh;
-                    width: 100vw;
-                }
-
-                #chart-container {
-                    width: 100%;
-                    height: 100%;
-                    position: relative;
-                }
-
-                canvas {
-                    width: 100%;
-                    height: 100%;
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                }
-
-                .tooltip {
-                    position: absolute;
-                    display: none;
-                    background-color: var(--tooltip-bg);
-                    border: 1px solid var(--tooltip-border);
-                    border-radius: 4px;
-                    padding: 8px 12px;
-                    color: var(--text-color);
-                    font-size: 12px;
-                    pointer-events: none;
-                    z-index: 100;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                    transition: all 0.1s ease;
-                }
-
-                .tooltip strong {
-                    display: block;
-                    margin-bottom: 4px;
-                    color: var(--victory-color);
-                }
-
-                .no-data {
-                    position: absolute;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    color: var(--text-secondary);
-                    font-size: 14px;
-                    text-align: center;
-                }
-            </style>
-        </head>
-        <body>
-            <div id="chart-container">
-                <canvas id="battles-chart"></canvas>
-                <div id="tooltip" class="tooltip"></div>
-                <div id="no-data" class="no-data" style="display:none;">Нет данных для отображения</div>
-            </div>
-
-            <script>
-                // Данные будут добавлены динамически
-                const chartData = CHART_DATA_PLACEHOLDER;
-
-                // Настройки анимации
-                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
-                const ANIMATION_DURATION = 800;
-
-                // Объект для отслеживания состояния графика
-                const chartState = {
-                    hoveredBar: null,
-                    tooltip: document.getElementById('tooltip'),
-                    noDataMessage: document.getElementById('no-data'),
-                    canvas: null,
-                    ctx: null,
-                    layout: {
-                        padding: null,
-                        graphArea: { x: 0, y: 0, width: 0, height: 0 }
-                    },
-                    mouse: { x: 0, y: 0 },
-                    bars: [],
-                    devicePixelRatio: window.devicePixelRatio || 1,
-                    // Для анимации
-                    animation: {
-                        progress: 0,
-                        startTime: 0,
-                        isAnimating: false
-                    }
-                };
-
-                function formatNumber(num) {
-                    return num.toLocaleString('ru-RU');
-                }
-
-                function getOptimalFontSize() {
-                    const canvas = chartState.canvas;
-                    if (!canvas) return 10;
-
-                    const width = canvas.clientWidth;
-                    if (width < 400) return 8;
-                    if (width < 600) return 9;
-                    return 10;
-                }
-
-                function calculateOptimalPadding() {
-                    const canvas = chartState.canvas;
-                    const width = canvas.clientWidth;
-                    const height = canvas.clientHeight;
-
-                    let leftPadding = Math.max(35, width * 0.06);
-                    let rightPadding = Math.max(20, width * 0.03);
-                    let topPadding = Math.max(15, height * 0.06);
-                    let bottomPadding = Math.max(25, height * 0.1);
-
-                    return {
-                        left: leftPadding,
-                        right: rightPadding, 
-                        top: topPadding,
-                        bottom: bottomPadding
-                    };
-                }
-
-                function drawChart(animationProgress = 1) {
-                    const canvas = document.getElementById('battles-chart');
-                    const ctx = canvas.getContext('2d');
-
-                    chartState.canvas = canvas;
-                    chartState.ctx = ctx;
-
-                    // Адаптивные размеры для высокого DPI
-                    const dpr = chartState.devicePixelRatio;
-                    const rect = canvas.getBoundingClientRect();
-
-                    canvas.width = rect.width * dpr;
-                    canvas.height = rect.height * dpr;
-
-                    ctx.scale(dpr, dpr);
-                    canvas.style.width = rect.width + 'px';
-                    canvas.style.height = rect.height + 'px';
-
-                    // Проверка наличия данных
-                    if (!chartData || !chartData.dates || chartData.dates.length === 0) {
-                        chartState.noDataMessage.style.display = 'block';
-                        return;
-                    } else {
-                        chartState.noDataMessage.style.display = 'none';
-                    }
-
-                    // Рассчитываем оптимальные отступы
-                    chartState.layout.padding = calculateOptimalPadding();
-                    const padding = chartState.layout.padding;
-
-                    const graphWidth = rect.width - padding.left - padding.right;
-                    const graphHeight = rect.height - padding.top - padding.bottom;
-
-                    chartState.layout.graphArea = {
-                        x: padding.left,
-                        y: padding.top,
-                        width: graphWidth,
-                        height: graphHeight
-                    };
-
-                    // Очистка canvas
-                    ctx.clearRect(0, 0, rect.width, rect.height);
-
-                    // Находим максимальные значения для масштабирования
-                    let maxBattles = 0;
-
-                    for (let i = 0; i < chartData.dates.length; i++) {
-                        const victories = chartData.victories[i] || 0;
-                        const defeats = chartData.defeats[i] || 0;
-                        const total = victories + defeats;
-
-                        maxBattles = Math.max(maxBattles, total);
-                    }
-
-                    // Защита от нулевых максимумов
-                    maxBattles = maxBattles || 10;
-
-                    // Рисуем оси и сетку
-                    drawAxes(ctx, padding, graphWidth, graphHeight, maxBattles, rect.width, rect.height);
-
-                    // Сбрасываем массивы элементов для интерактивности
-                    chartState.bars = [];
-
-                    // Отрисовка столбцов побед и поражений с учетом анимации
-                    drawBars(ctx, padding, graphWidth, graphHeight, maxBattles, rect.width, rect.height, animationProgress);
-                }
-
-                function drawAxes(ctx, padding, graphWidth, graphHeight, maxBattles, canvasWidth, canvasHeight) {
-                    const baselineY = canvasHeight - padding.bottom;
-                    const baselineX = padding.left;
-                    const fontSize = getOptimalFontSize();
-
-                    // Фон области графика
-                    ctx.fillStyle = 'rgba(20, 26, 47, 0.5)';
-                    ctx.fillRect(padding.left, padding.top, graphWidth, graphHeight);
-
-                    // Отрисовка сетки
-                    ctx.strokeStyle = 'rgba(40, 48, 77, 0.8)';
-                    ctx.lineWidth = 0.8;
-                    ctx.beginPath();
-
-                    // Определяем интервалы для шкалы боев
-                    const battleStep = calculateAxisStep(maxBattles);
-                    const numBattleLines = Math.floor(maxBattles / battleStep) + 1;
-
-                    // Горизонтальные линии сетки
-                    for (let i = 0; i < numBattleLines; i++) {
-                        const value = i * battleStep;
-                        const y = baselineY - (value / maxBattles) * graphHeight;
-
-                        ctx.moveTo(baselineX, y);
-                        ctx.lineTo(baselineX + graphWidth, y);
-
-                        // Подпись значения оси Y
-                        if (canvasWidth > 300) {
-                            ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
-                            ctx.font = `${fontSize}px Arial`;
-                            ctx.textAlign = 'right';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(value, baselineX - 5, y);
-                        }
-                    }
-
-                    // Вертикальные линии сетки и подписи дат
-                    const dataLength = chartData.dates.length;
-                    const availableWidth = graphWidth / dataLength;
-                    let skipFactor = 1;
-
-                    if (availableWidth < 50) skipFactor = 2;
-                    if (availableWidth < 30) skipFactor = 3;
-
-                    for (let i = 0; i < dataLength; i++) {
-                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
-
-                        ctx.moveTo(x, padding.top);
-                        ctx.lineTo(x, baselineY);
-
-                        if (i % skipFactor === 0 || i === dataLength - 1) {
-                            ctx.fillStyle = 'rgba(155, 160, 188, 0.9)';
-                            ctx.font = `${fontSize}px Arial`;
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'top';
-                            ctx.fillText(chartData.dates[i], x, baselineY + 5);
-                        }
-                    }
-
-                    ctx.stroke();
-
-                    // Горизонтальная базовая линия
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(155, 160, 188, 0.3)';
-                    ctx.lineWidth = 1;
-                    ctx.moveTo(padding.left, baselineY);
-                    ctx.lineTo(padding.left + graphWidth, baselineY);
-                    ctx.stroke();
-                }
-
-                function drawBars(ctx, padding, graphWidth, graphHeight, maxBattles, canvasWidth, canvasHeight, animationProgress) {
-                    const baselineY = canvasHeight - padding.bottom;
-                    const dataLength = chartData.dates.length;
-
-                    const maxBarWidth = 40;
-                    let barWidth = Math.min((graphWidth / dataLength) * 0.7, maxBarWidth);
-                    const barGap = Math.max(1, Math.min(2, barWidth * 0.1));
-                    const halfBarWidth = barWidth / 2;
-                    const singleBarWidth = (barWidth - barGap) / 2;
-
-                    for (let i = 0; i < dataLength; i++) {
-                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
-                        const barX = x - halfBarWidth;
-
-                        const victories = chartData.victories[i] || 0;
-                        const defeats = chartData.defeats[i] || 0;
-
-                        // Вычисляем высоту столбцов с учетом анимации
-                        const victoryHeight = (victories / maxBattles) * graphHeight * animationProgress;
-                        const defeatHeight = (defeats / maxBattles) * graphHeight * animationProgress;
-
-                        // Создаем градиент для побед
-                        const victoryGradient = ctx.createLinearGradient(0, baselineY - victoryHeight, 0, baselineY);
-                        victoryGradient.addColorStop(0, 'rgba(66, 225, 137, 1)');
-                        victoryGradient.addColorStop(1, 'rgba(66, 225, 137, 0.7)');
-
-                        // Рисуем столбец побед
-                        ctx.fillStyle = victoryGradient;
-                        const victoryRect = {
-                            x: barX,
-                            y: baselineY - victoryHeight,
-                            width: singleBarWidth,
-                            height: Math.max(1, victoryHeight),
-                            type: 'victory',
-                            value: victories,
-                            date: chartData.dates[i],
-                            index: i
-                        };
-
-                        const radius = Math.min(3, singleBarWidth / 4);
-
-                        ctx.beginPath();
-                        ctx.moveTo(victoryRect.x + radius, victoryRect.y);
-                        ctx.lineTo(victoryRect.x + victoryRect.width - radius, victoryRect.y);
-                        ctx.quadraticCurveTo(victoryRect.x + victoryRect.width, victoryRect.y, victoryRect.x + victoryRect.width, victoryRect.y + radius);
-                        ctx.lineTo(victoryRect.x + victoryRect.width, victoryRect.y + victoryRect.height);
-                        ctx.lineTo(victoryRect.x, victoryRect.y + victoryRect.height);
-                        ctx.lineTo(victoryRect.x, victoryRect.y + radius);
-                        ctx.quadraticCurveTo(victoryRect.x, victoryRect.y, victoryRect.x + radius, victoryRect.y);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        chartState.bars.push(victoryRect);
-
-                        // Создаем градиент для поражений
-                        const defeatGradient = ctx.createLinearGradient(0, baselineY - defeatHeight, 0, baselineY);
-                        defeatGradient.addColorStop(0, 'rgba(255, 107, 108, 1)');
-                        defeatGradient.addColorStop(1, 'rgba(255, 107, 108, 0.7)');
-
-                        // Рисуем столбец поражений
-                        ctx.fillStyle = defeatGradient;
-                        const defeatRect = {
-                            x: barX + singleBarWidth + barGap,
-                            y: baselineY - defeatHeight,
-                            width: singleBarWidth,
-                            height: Math.max(1, defeatHeight),
-                            type: 'defeat',
-                            value: defeats,
-                            date: chartData.dates[i],
-                            index: i
-                        };
-
-                        ctx.beginPath();
-                        ctx.moveTo(defeatRect.x + radius, defeatRect.y);
-                        ctx.lineTo(defeatRect.x + defeatRect.width - radius, defeatRect.y);
-                        ctx.quadraticCurveTo(defeatRect.x + defeatRect.width, defeatRect.y, defeatRect.x + defeatRect.width, defeatRect.y + radius);
-                        ctx.lineTo(defeatRect.x + defeatRect.width, defeatRect.y + defeatRect.height);
-                        ctx.lineTo(defeatRect.x, defeatRect.y + defeatRect.height);
-                        ctx.lineTo(defeatRect.x, defeatRect.y + radius);
-                        ctx.quadraticCurveTo(defeatRect.x, defeatRect.y, defeatRect.x + radius, defeatRect.y);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        chartState.bars.push(defeatRect);
-                    }
-                }
-
-                function checkForInteractions(event) {
-                    const canvas = chartState.canvas;
-                    const rect = canvas.getBoundingClientRect();
-                    const x = event.clientX - rect.left;
-                    const y = event.clientY - rect.top;
-
-                    chartState.mouse = { x, y };
-
-                    let hoveredBar = null;
-                    for (const bar of chartState.bars) {
-                        if (
-                            x >= bar.x && 
-                            x <= bar.x + bar.width && 
-                            y >= bar.y && 
-                            y <= bar.y + bar.height
-                        ) {
-                            hoveredBar = bar;
-                            break;
-                        }
-                    }
-
-                    if (hoveredBar) {
-                        const tooltip = chartState.tooltip;
-                        tooltip.style.display = 'block';
-
-                        let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
-                        let tooltipY = Math.max(y - 10, 10);
-
-                        if (y > canvas.clientHeight - 80) {
-                            tooltipY = y - 70;
-                        }
-
-                        tooltip.style.left = tooltipX + 'px';
-                        tooltip.style.top = tooltipY + 'px';
-
-                        const typeText = hoveredBar.type === 'victory' ? 'Победы' : 'Поражения';
-                        const valueText = formatNumber(hoveredBar.value);
-
-                        tooltip.innerHTML = `
-                            <strong>${hoveredBar.date}</strong>
-                            ${typeText}: ${valueText}
-                        `;
-                    } else {
-                        chartState.tooltip.style.display = 'none';
-                    }
-
-                    chartState.hoveredBar = hoveredBar;
-                }
-
-                function calculateAxisStep(maxValue) {
-                    if (maxValue <= 5) return 1;
-                    if (maxValue <= 20) return 5;
-                    if (maxValue <= 50) return 10;
-                    if (maxValue <= 100) return 20;
-                    if (maxValue <= 500) return 100;
-
-                    const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
-                    return Math.ceil(maxValue / 5 / magnitude) * magnitude;
-                }
-
-                function animateChart(timestamp) {
-                    if (!chartState.animation.isAnimating) return;
-
-                    if (!chartState.animation.startTime) {
-                        chartState.animation.startTime = timestamp;
-                    }
-
-                    const elapsed = timestamp - chartState.animation.startTime;
-                    const duration = ANIMATION_DURATION;
-
-                    let progress = elapsed / duration;
-                    progress = Math.min(1, progress);
-
-                    const animationProgress = 1 - Math.pow(1 - progress, 3);
-
-                    drawChart(animationProgress);
-
-                    if (progress < 1) {
-                        requestAnimationFrame(animateChart);
-                    } else {
-                        chartState.animation.isAnimating = false;
-                    }
-                }
-
-                function setupEventListeners() {
-                    const canvas = document.getElementById('battles-chart');
-
-                    canvas.addEventListener('mousemove', checkForInteractions);
-
-                    canvas.addEventListener('mouseleave', function() {
-                        chartState.tooltip.style.display = 'none';
-                    });
-
-                    window.addEventListener('resize', function() {
-                        drawChart(1);
-                    });
-                }
-
-                window.onload = function() {
-                    setupEventListeners();
-
-                    if (ENABLE_ANIMATIONS) {
-                        chartState.animation.isAnimating = true;
-                        requestAnimationFrame(animateChart);
-                    } else {
-                        drawChart(1);
-                    }
-                };
-            </script>
-        </body>
-        </html>
-        """
-
-        try:
-            fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix="aom_battles_chart_")
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-
-            self._py_logger.debug(f"Создан шаблон графика побед: {self.html_path}")
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при создании HTML-шаблона графика побед: {e}")
-
-    def update_chart(self, trend_data, force_no_animation=False):
-        """Обновляет график новыми данными."""
-        if not trend_data or not self.html_path:
-            self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
-            return
-
-        try:
-            # Вызываем родительский метод для логики анимации
-            super().update_chart(trend_data, force_no_animation)
-
-            # Чтение текущего HTML
-            with open(self.html_path, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-
-            # Проверка данных
-            if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
-                self._py_logger.warning("Пустой набор данных for график побед")
-                trend_data = {
-                    "dates": [],
-                    "victories": [],
-                    "defeats": []
-                }
-
-            # Подготовка данных для JSON
-            import json
-            json_data = json.dumps(trend_data)
-
-            # ИСПРАВЛЕНО: Используем исправленную логику анимации
-            enable_animation = self.should_animate(force_no_animation)
-
-            # Замена плейсхолдеров данными
-            updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
-            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
-
-            # Запись обновленного HTML
-            with open(self.html_path, 'w', encoding='utf-8') as f:
-                f.write(updated_html)
-
-            # Принудительная очистка кэша WebView только при анимации
-            if enable_animation:
-                try:
-                    self.web_view.page().profile().clearHttpCache()
-                except Exception as cache_error:
-                    self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
-
-            # Загрузка обновленного HTML в WebView
-            from PyQt6.QtCore import QUrl
-            self.web_view.load(QUrl.fromLocalFile(self.html_path))
-
-            animation_status = "с анимацией" if enable_animation else "без анимации"
-            self._py_logger.debug(
-                f"График побед обновлен {animation_status}, точек данных: {len(trend_data.get('dates', []))}")
-
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при обновлении графика побед: {e}")
-
-    def clear(self):
-        """Очищает график."""
-        empty_data = {
-            "dates": [],
-            "victories": [],
-            "defeats": []
-        }
-        self.update_chart(empty_data)
+        super().__init__(ChartConfig.BATTLES, parent)
 
 
 class KeysChartWidget(ResponsiveChartWidget):
-    """Виджет для отображения графика собранных ключей (без линии ключей за победу)."""
+    """Виджет для отображения графика собранных ключей."""
 
     def __init__(self, parent=None):
-        super().__init__("Сбор ключей (7 дней)", parent)
-
-        # Настройка легенды (только для столбцов ключей, без линии)
-        keys_legend = QLabel("● Собрано ключей")
-        keys_legend.setStyleSheet(f"color: {Styles.COLORS['warning']}; font-size: 12px;")
-        self.legend_layout.addWidget(keys_legend)
-
-        self.legend_layout.addStretch()
-
-    def create_html_template(self):
-        """Создает HTML-шаблон с улучшенным Canvas-графиком для ключей."""
-        html_content = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Keys Chart</title>
-            <style>
-                :root {
-                    --bg-color: #171D33;
-                    --grid-color: #28304d;
-                    --text-color: #FFFFFF;
-                    --text-secondary: #9BA0BC;
-                    --keys-color: #FFB169;
-                    --tooltip-bg: #2A3158;
-                    --tooltip-border: #353E65;
-                }
-
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
-
-                body {
-                    margin: 0;
-                    padding: 0;
-                    background-color: var(--bg-color);
-                    color: var(--text-color);
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    overflow: hidden;
-                    height: 100vh;
-                    width: 100vw;
-                }
-
-                #chart-container {
-                    width: 100%;
-                    height: 100%;
-                    position: relative;
-                }
-
-                canvas {
-                    width: 100%;
-                    height: 100%;
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                }
-
-                .tooltip {
-                    position: absolute;
-                    display: none;
-                    background-color: var(--tooltip-bg);
-                    border: 1px solid var(--tooltip-border);
-                    border-radius: 4px;
-                    padding: 8px 12px;
-                    color: var(--text-color);
-                    font-size: 12px;
-                    pointer-events: none;
-                    z-index: 100;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                    transition: all 0.1s ease;
-                }
-
-                .tooltip strong {
-                    display: block;
-                    margin-bottom: 4px;
-                    color: var(--keys-color);
-                }
-
-                .no-data {
-                    position: absolute;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    color: var(--text-secondary);
-                    font-size: 14px;
-                    text-align: center;
-                }
-            </style>
-        </head>
-        <body>
-            <div id="chart-container">
-                <canvas id="keys-chart"></canvas>
-                <div id="tooltip" class="tooltip"></div>
-                <div id="no-data" class="no-data" style="display:none;">Нет данных для отображения</div>
-            </div>
-
-            <script>
-                // Данные будут добавлены динамически
-                const chartData = CHART_DATA_PLACEHOLDER;
-
-                // Настройки анимации
-                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
-                const ANIMATION_DURATION = 800;
-
-                // Объект для отслеживания состояния графика
-                const chartState = {
-                    hoveredBar: null,
-                    tooltip: document.getElementById('tooltip'),
-                    noDataMessage: document.getElementById('no-data'),
-                    canvas: null,
-                    ctx: null,
-                    layout: {
-                        padding: null,
-                        graphArea: { x: 0, y: 0, width: 0, height: 0 }
-                    },
-                    mouse: { x: 0, y: 0 },
-                    bars: [],
-                    devicePixelRatio: window.devicePixelRatio || 1,
-                    // Для анимации
-                    animation: {
-                        progress: 0,
-                        startTime: 0,
-                        isAnimating: false
-                    }
-                };
-
-                function formatNumber(num) {
-                    return num.toLocaleString('ru-RU');
-                }
-
-                function getOptimalFontSize() {
-                    // Адаптивный размер шрифта в зависимости от ширины канваса
-                    const canvas = chartState.canvas;
-                    if (!canvas) return 10;
-
-                    const width = canvas.clientWidth;
-                    if (width < 400) return 8;
-                    if (width < 600) return 9;
-                    return 10;
-                }
-
-                function calculateOptimalPadding() {
-                    // Рассчитываем оптимальные отступы в зависимости от размера канваса
-                    const canvas = chartState.canvas;
-                    const width = canvas.clientWidth;
-                    const height = canvas.clientHeight;
-
-                    let leftPadding = Math.max(40, width * 0.06);
-                    let rightPadding = Math.max(20, width * 0.03); // Уменьшаем правый отступ, т.к. нет второй оси Y
-                    let topPadding = Math.max(15, height * 0.06);
-                    let bottomPadding = Math.max(25, height * 0.1);
-
-                    return {
-                        left: leftPadding,
-                        right: rightPadding, 
-                        top: topPadding,
-                        bottom: bottomPadding
-                    };
-                }
-
-                function drawChart(animationProgress = 1) {
-                    const canvas = document.getElementById('keys-chart');
-                    const ctx = canvas.getContext('2d');
-
-                    chartState.canvas = canvas;
-                    chartState.ctx = ctx;
-
-                    // Адаптивные размеры для высокого DPI
-                    const dpr = chartState.devicePixelRatio;
-                    const rect = canvas.getBoundingClientRect();
-
-                    canvas.width = rect.width * dpr;
-                    canvas.height = rect.height * dpr;
-
-                    ctx.scale(dpr, dpr);
-                    canvas.style.width = rect.width + 'px';
-                    canvas.style.height = rect.height + 'px';
-
-                    // Проверка наличия данных
-                    if (!chartData || !chartData.dates || chartData.dates.length === 0) {
-                        chartState.noDataMessage.style.display = 'block';
-                        return;
-                    } else {
-                        chartState.noDataMessage.style.display = 'none';
-                    }
-
-                    // Рассчитываем оптимальные отступы
-                    chartState.layout.padding = calculateOptimalPadding();
-                    const padding = chartState.layout.padding;
-
-                    const graphWidth = rect.width - padding.left - padding.right;
-                    const graphHeight = rect.height - padding.top - padding.bottom;
-
-                    chartState.layout.graphArea = {
-                        x: padding.left,
-                        y: padding.top,
-                        width: graphWidth,
-                        height: graphHeight
-                    };
-
-                    // Очистка canvas
-                    ctx.clearRect(0, 0, rect.width, rect.height);
-
-                    // Находим максимальные значения для масштабирования
-                    let maxKeys = 0;
-
-                    for (let i = 0; i < chartData.dates.length; i++) {
-                        const keys = chartData.keys_collected[i] || 0;
-                        maxKeys = Math.max(maxKeys, keys);
-                    }
-
-                    // Защита от нулевых максимумов
-                    maxKeys = maxKeys || 1000;
-
-                    // Рисуем оси и сетку
-                    drawAxes(ctx, padding, graphWidth, graphHeight, maxKeys, rect.width, rect.height);
-
-                    // Сбрасываем массивы элементов для интерактивности
-                    chartState.bars = [];
-
-                    // Отрисовка столбцов ключей с учетом анимации
-                    drawBars(ctx, padding, graphWidth, graphHeight, maxKeys, rect.width, rect.height, animationProgress);
-                }
-
-                function drawAxes(ctx, padding, graphWidth, graphHeight, maxKeys, canvasWidth, canvasHeight) {
-                    const baselineY = canvasHeight - padding.bottom;
-                    const baselineX = padding.left;
-                    const fontSize = getOptimalFontSize();
-
-                    // Фон области графика (полупрозрачный)
-                    ctx.fillStyle = 'rgba(20, 26, 47, 0.5)';
-                    ctx.fillRect(padding.left, padding.top, graphWidth, graphHeight);
-
-                    // Отрисовка сетки
-                    ctx.strokeStyle = 'rgba(40, 48, 77, 0.8)';
-                    ctx.lineWidth = 0.8;
-                    ctx.beginPath();
-
-                    // Определяем интервалы для шкалы ключей
-                    const keyStep = calculateAxisStep(maxKeys);
-                    const numKeyLines = Math.floor(maxKeys / keyStep) + 1;
-
-                    // Горизонтальные линии сетки (шкала ключей)
-                    for (let i = 0; i < numKeyLines; i++) {
-                        const value = i * keyStep;
-                        const y = baselineY - (value / maxKeys) * graphHeight;
-
-                        ctx.moveTo(baselineX, y);
-                        ctx.lineTo(baselineX + graphWidth, y);
-
-                        // Подпись значения оси Y (ключи)
-                        if (canvasWidth > 300) {
-                            ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
-                            ctx.font = `${fontSize}px Arial`;
-                            ctx.textAlign = 'right';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(formatNumber(value), baselineX - 5, y);
-                        }
-                    }
-
-                    // Вертикальные линии сетки и подписи дат
-                    const dataLength = chartData.dates.length;
-                    const availableWidth = graphWidth / dataLength;
-                    let skipFactor = 1;
-
-                    // Определяем, нужно ли пропускать даты
-                    if (availableWidth < 50) skipFactor = 2;
-                    if (availableWidth < 30) skipFactor = 3;
-
-                    for (let i = 0; i < dataLength; i++) {
-                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
-
-                        // Рисуем вертикальную линию сетки
-                        ctx.moveTo(x, padding.top);
-                        ctx.lineTo(x, baselineY);
-
-                        // Подпись даты (пропускаем некоторые для экономии места)
-                        if (i % skipFactor === 0 || i === dataLength - 1) {
-                            ctx.fillStyle = 'rgba(155, 160, 188, 0.9)';
-                            ctx.font = `${fontSize}px Arial`;
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'top';
-                            ctx.fillText(chartData.dates[i], x, baselineY + 5);
-                        }
-                    }
-
-                    ctx.stroke();
-
-                    // Горизонтальная базовая линия
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(155, 160, 188, 0.3)';
-                    ctx.lineWidth = 1;
-                    ctx.moveTo(padding.left, baselineY);
-                    ctx.lineTo(padding.left + graphWidth, baselineY);
-                    ctx.stroke();
-                }
-
-                function drawBars(ctx, padding, graphWidth, graphHeight, maxKeys, canvasWidth, canvasHeight, animationProgress) {
-                    const baselineY = canvasHeight - padding.bottom;
-                    const dataLength = chartData.dates.length;
-
-                    // Вычисляем оптимальную ширину столбцов (можем сделать их шире, т.к. теперь только один тип столбцов)
-                    const maxBarWidth = 60;
-                    let barWidth = Math.min((graphWidth / dataLength) * 0.8, maxBarWidth);
-
-                    for (let i = 0; i < dataLength; i++) {
-                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
-                        const barX = x - (barWidth / 2);
-
-                        const keys = chartData.keys_collected[i] || 0;
-
-                        // Вычисляем высоту столбца с учетом анимации
-                        const keyHeight = (keys / maxKeys) * graphHeight * animationProgress;
-
-                        // Создаем градиент для столбца ключей
-                        const keyGradient = ctx.createLinearGradient(0, baselineY - keyHeight, 0, baselineY);
-                        keyGradient.addColorStop(0, 'rgba(255, 177, 105, 1)');    // Ярче вверху
-                        keyGradient.addColorStop(1, 'rgba(255, 177, 105, 0.7)');  // Более прозрачный внизу
-
-                        // Рисуем столбец ключей
-                        ctx.fillStyle = keyGradient;
-                        const keyRect = {
-                            x: barX,
-                            y: baselineY - keyHeight,
-                            width: barWidth,
-                            height: Math.max(1, keyHeight),
-                            value: keys,
-                            date: chartData.dates[i],
-                            index: i
-                        };
-
-                        // Скругленные углы для верхней части
-                        const radius = Math.min(4, barWidth / 4);
-
-                        // Рисуем столбец со скругленными углами вверху
-                        ctx.beginPath();
-                        ctx.moveTo(keyRect.x + radius, keyRect.y);
-                        ctx.lineTo(keyRect.x + keyRect.width - radius, keyRect.y);
-                        ctx.quadraticCurveTo(keyRect.x + keyRect.width, keyRect.y, keyRect.x + keyRect.width, keyRect.y + radius);
-                        ctx.lineTo(keyRect.x + keyRect.width, keyRect.y + keyRect.height);
-                        ctx.lineTo(keyRect.x, keyRect.y + keyRect.height);
-                        ctx.lineTo(keyRect.x, keyRect.y + radius);
-                        ctx.quadraticCurveTo(keyRect.x, keyRect.y, keyRect.x + radius, keyRect.y);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        // Добавляем блик на столбце
-                        const highlightWidth = barWidth * 0.4;
-                        const highlightGradient = ctx.createLinearGradient(
-                            keyRect.x + barWidth * 0.3, keyRect.y,
-                            keyRect.x + barWidth * 0.3 + highlightWidth, keyRect.y
-                        );
-                        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
-                        highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-                        ctx.fillStyle = highlightGradient;
-                        ctx.beginPath();
-                        ctx.moveTo(keyRect.x + barWidth * 0.3, keyRect.y);
-                        ctx.lineTo(keyRect.x + barWidth * 0.3 + highlightWidth, keyRect.y);
-                        ctx.lineTo(keyRect.x + barWidth * 0.3 + highlightWidth, keyRect.y + keyRect.height);
-                        ctx.lineTo(keyRect.x + barWidth * 0.3, keyRect.y + keyRect.height);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        chartState.bars.push(keyRect);
-                    }
-                }
-
-                function checkForInteractions(event) {
-                    const canvas = chartState.canvas;
-                    const rect = canvas.getBoundingClientRect();
-                    const x = event.clientX - rect.left;
-                    const y = event.clientY - rect.top;
-
-                    chartState.mouse = { x, y };
-
-                    // Проверяем наведение на столбцы
-                    let hoveredBar = null;
-                    for (const bar of chartState.bars) {
-                        if (
-                            x >= bar.x && 
-                            x <= bar.x + bar.width && 
-                            y >= bar.y && 
-                            y <= bar.y + bar.height
-                        ) {
-                            hoveredBar = bar;
-                            break;
-                        }
-                    }
-
-                    // Обновляем подсказку
-                    if (hoveredBar) {
-                        const tooltip = chartState.tooltip;
-                        tooltip.style.display = 'block';
-
-                        // Позиционируем подсказку, чтобы она не выходила за границы экрана
-                        let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
-                        let tooltipY = Math.max(y - 10, 10);
-
-                        // Если подсказка слишком низко, показываем ее выше
-                        if (y > canvas.clientHeight - 80) {
-                            tooltipY = y - 70;
-                        }
-
-                        tooltip.style.left = tooltipX + 'px';
-                        tooltip.style.top = tooltipY + 'px';
-
-                        const valueText = formatNumber(hoveredBar.value);
-
-                        // Улучшенное форматирование подсказки
-                        tooltip.innerHTML = `
-                            <strong>${hoveredBar.date}</strong>
-                            Собрано ключей: ${valueText}
-                        `;
-                    } else {
-                        chartState.tooltip.style.display = 'none';
-                    }
-
-                    // Обновляем состояние графика
-                    chartState.hoveredBar = hoveredBar;
-                }
-
-                function calculateAxisStep(maxValue) {
-                    // Помогает определить удобный шаг для оси
-                    if (maxValue <= 5) return 1;
-                    if (maxValue <= 20) return 5;
-                    if (maxValue <= 50) return 10;
-                    if (maxValue <= 100) return 20;
-                    if (maxValue <= 500) return 100;
-                    if (maxValue <= 1000) return 200;
-                    if (maxValue <= 5000) return 1000;
-                    if (maxValue <= 10000) return 2000;
-                    if (maxValue <= 50000) return 10000;
-
-                    // Для больших значений
-                    const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
-                    return Math.ceil(maxValue / 5 / magnitude) * magnitude;
-                }
-
-                function animateChart(timestamp) {
-                    if (!chartState.animation.isAnimating) return;
-
-                    if (!chartState.animation.startTime) {
-                        chartState.animation.startTime = timestamp;
-                    }
-
-                    const elapsed = timestamp - chartState.animation.startTime;
-                    const duration = ANIMATION_DURATION;
-
-                    // Рассчитываем прогресс анимации (от 0 до 1) с эффектом ease-out
-                    let progress = elapsed / duration;
-                    progress = Math.min(1, progress);
-
-                    // Применяем кривую плавности (ease-out)
-                    const animationProgress = 1 - Math.pow(1 - progress, 3);
-
-                    // Обновляем график с текущим прогрессом анимации
-                    drawChart(animationProgress);
-
-                    if (progress < 1) {
-                        // Если анимация не завершена, запрашиваем следующий кадр
-                        requestAnimationFrame(animateChart);
-                    } else {
-                        // Анимация завершена
-                        chartState.animation.isAnimating = false;
-                    }
-                }
-
-                // Обработчики событий
-                function setupEventListeners() {
-                    const canvas = document.getElementById('keys-chart');
-
-                    canvas.addEventListener('mousemove', checkForInteractions);
-
-                    canvas.addEventListener('mouseleave', function() {
-                        chartState.tooltip.style.display = 'none';
-                    });
-
-                    // Обработка изменения размера
-                    window.addEventListener('resize', function() {
-                        // При изменении размера перерисовываем без анимации
-                        drawChart(1);
-                    });
-                }
-
-                // Инициализация с анимацией
-                window.onload = function() {
-                    setupEventListeners();
-
-                    // Проверяем, нужно ли включать анимацию
-                    if (ENABLE_ANIMATIONS) {
-                        chartState.animation.isAnimating = true;
-                        requestAnimationFrame(animateChart);
-                    } else {
-                        // Рисуем график сразу полностью без анимации
-                        drawChart(1);
-                    }
-                };
-            </script>
-        </body>
-        </html>
-        """
-
-        try:
-            # Создаем временный файл
-            fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix="aom_keys_chart_")
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-
-            self._py_logger.debug(f"Создан шаблон графика ключей: {self.html_path}")
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при создании HTML-шаблона графика ключей: {e}")
-
-    def update_chart(self, trend_data, force_no_animation=False):
-        """Обновляет график новыми данными."""
-        if not trend_data or not self.html_path:
-            self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
-            return
-
-        try:
-            # Вызываем родительский метод для логики анимации
-            super().update_chart(trend_data, force_no_animation)
-
-            # Чтение текущего HTML
-            with open(self.html_path, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-
-            # Проверка данных
-            if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
-                self._py_logger.warning("Пустой набор данных для графика ключей")
-                trend_data = {
-                    "dates": [],
-                    "keys_collected": []
-                }
-
-            # Подготовка данных для JSON
-            import json
-            json_data = json.dumps(trend_data)
-
-            # Определяем, нужна ли анимация на основе новой логики
-            enable_animation = self.should_animate(force_no_animation)
-
-            # Замена плейсхолдеров данными
-            updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
-            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
-
-            # Запись обновленного HTML
-            with open(self.html_path, 'w', encoding='utf-8') as f:
-                f.write(updated_html)
-
-            # Принудительная очистка кэша WebView только при анимации
-            if enable_animation:
-                try:
-                    self.web_view.page().profile().clearHttpCache()
-                except Exception as cache_error:
-                    self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
-
-            # Загрузка обновленного HTML в WebView
-            from PyQt6.QtCore import QUrl
-            self.web_view.load(QUrl.fromLocalFile(self.html_path))
-
-            animation_status = "с анимацией" if enable_animation else "без анимации"
-            self._py_logger.debug(
-                f"График ключей обновлен {animation_status}, точек данных: {len(trend_data.get('dates', []))}")
-
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
-
-    def clear(self):
-        """Очищает график."""
-        empty_data = {
-            "dates": [],
-            "keys_collected": []
-        }
-        self.update_chart(empty_data)
+        super().__init__(ChartConfig.KEYS, parent)
 
 
 class SilverChartWidget(ResponsiveChartWidget):
     """Виджет для отображения графика собранного серебра."""
 
     def __init__(self, parent=None):
-        super().__init__("Сбор серебра (7 дней)", parent)
-
-        # Настройка легенды для серебра
-        silver_legend = QLabel("● Собрано серебра")
-        silver_legend.setStyleSheet(f"color: {Styles.COLORS['primary']}; font-size: 12px;")
-        self.legend_layout.addWidget(silver_legend)
-
-        self.legend_layout.addStretch()
-
-    def create_html_template(self):
-        """Создает HTML-шаблон с улучшенным Canvas-графиком для серебра."""
-        html_content = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Silver Chart</title>
-            <style>
-                :root {
-                    --bg-color: #171D33;
-                    --grid-color: #28304d;
-                    --text-color: #FFFFFF;
-                    --text-secondary: #9BA0BC;
-                    --silver-color: #3FE0C8;
-                    --tooltip-bg: #2A3158;
-                    --tooltip-border: #353E65;
-                }
-
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
-
-                body {
-                    margin: 0;
-                    padding: 0;
-                    background-color: var(--bg-color);
-                    color: var(--text-color);
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    overflow: hidden;
-                    height: 100vh;
-                    width: 100vw;
-                }
-
-                #chart-container {
-                    width: 100%;
-                    height: 100%;
-                    position: relative;
-                }
-
-                canvas {
-                    width: 100%;
-                    height: 100%;
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                }
-
-                .tooltip {
-                    position: absolute;
-                    display: none;
-                    background-color: var(--tooltip-bg);
-                    border: 1px solid var(--tooltip-border);
-                    border-radius: 4px;
-                    padding: 8px 12px;
-                    color: var(--text-color);
-                    font-size: 12px;
-                    pointer-events: none;
-                    z-index: 100;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                    transition: all 0.1s ease;
-                }
-
-                .tooltip strong {
-                    display: block;
-                    margin-bottom: 4px;
-                    color: var(--silver-color);
-                }
-
-                .no-data {
-                    position: absolute;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    color: var(--text-secondary);
-                    font-size: 14px;
-                    text-align: center;
-                }
-            </style>
-        </head>
-        <body>
-            <div id="chart-container">
-                <canvas id="silver-chart"></canvas>
-                <div id="tooltip" class="tooltip"></div>
-                <div id="no-data" class="no-data" style="display:none;">Нет данных для отображения</div>
-            </div>
-
-            <script>
-                // Данные будут добавлены динамически
-                const chartData = CHART_DATA_PLACEHOLDER;
-
-                // Настройки анимации
-                const ENABLE_ANIMATIONS = ENABLE_ANIMATION_PLACEHOLDER && window.innerWidth > 600;
-                const ANIMATION_DURATION = 800;
-
-                // Объект для отслеживания состояния графика
-                const chartState = {
-                    hoveredBar: null,
-                    tooltip: document.getElementById('tooltip'),
-                    noDataMessage: document.getElementById('no-data'),
-                    canvas: null,
-                    ctx: null,
-                    layout: {
-                        padding: null,
-                        graphArea: { x: 0, y: 0, width: 0, height: 0 }
-                    },
-                    mouse: { x: 0, y: 0 },
-                    bars: [],
-                    devicePixelRatio: window.devicePixelRatio || 1,
-                    // Для анимации
-                    animation: {
-                        progress: 0,
-                        startTime: 0,
-                        isAnimating: false
-                    }
-                };
-
-                // Новая функция форматирования значений серебра
-                function formatSilverValue(value) {
-                    // value приходит уже в тысячах (K)
-                    if (value === null || value === undefined || value === 0) {
-                        return "0K";
-                    }
-
-                    // Для очень маленьких значений (менее 1K)
-                    if (value < 1) {
-                        const formatted = value.toFixed(1);
-                        return formatted.endsWith('.0') ? formatted.replace('.0', '') + "K" : formatted + "K";
-                    }
-                    // От 1K до 999K - остаемся в K
-                    else if (value < 1000) {
-                        const formatted = value.toFixed(1);
-                        if (formatted.endsWith('.0')) {
-                            return Math.floor(value) + "K";
-                        } else {
-                            return formatted + "K";
-                        }
-                    }
-                    // От 1000K до 999999K - переходим в млн (1000K = 1млн)
-                    else if (value < 1000000) {
-                        const millions = value / 1000;
-                        const formatted = millions.toFixed(1);
-                        if (formatted.endsWith('.0')) {
-                            return Math.floor(millions) + "млн";
-                        } else {
-                            return formatted + "млн";
-                        }
-                    }
-                    // От 1000000K до 999999999K - переходим в млрд
-                    else if (value < 1000000000) {
-                        const billions = value / 1000000;
-                        const formatted = billions.toFixed(1);
-                        if (formatted.endsWith('.0')) {
-                            return Math.floor(billions) + "млрд";
-                        } else {
-                            return formatted + "млрд";
-                        }
-                    }
-                    // Свыше 1000000000K - переходим в трлн
-                    else {
-                        const trillions = value / 1000000000;
-                        const formatted = trillions.toFixed(1);
-                        if (formatted.endsWith('.0')) {
-                            return Math.floor(trillions) + "трлн";
-                        } else {
-                            return formatted + "трлн";
-                        }
-                    }
-                }
-
-                // Стандартная функция форматирования чисел (для числовых значений без суффиксов)
-                function formatNumber(num) {
-                    return num.toLocaleString('ru-RU', {
-                        minimumFractionDigits: 1,
-                        maximumFractionDigits: 1
-                    });
-                }
-
-                function getOptimalFontSize() {
-                    // Адаптивный размер шрифта в зависимости от ширины канваса
-                    const canvas = chartState.canvas;
-                    if (!canvas) return 10;
-
-                    const width = canvas.clientWidth;
-                    if (width < 400) return 8;
-                    if (width < 600) return 9;
-                    return 10;
-                }
-
-                function calculateOptimalPadding() {
-                    // Рассчитываем оптимальные отступы в зависимости от размера канваса
-                    const canvas = chartState.canvas;
-                    const width = canvas.clientWidth;
-                    const height = canvas.clientHeight;
-
-                    let leftPadding = Math.max(40, width * 0.06);
-                    let rightPadding = Math.max(20, width * 0.03); // Уменьшаем правый отступ, т.к. нет второй оси Y
-                    let topPadding = Math.max(15, height * 0.06);
-                    let bottomPadding = Math.max(25, height * 0.1);
-
-                    return {
-                        left: leftPadding,
-                        right: rightPadding, 
-                        top: topPadding,
-                        bottom: bottomPadding
-                    };
-                }
-
-                function drawChart(animationProgress = 1) {
-                    const canvas = document.getElementById('silver-chart');
-                    const ctx = canvas.getContext('2d');
-
-                    chartState.canvas = canvas;
-                    chartState.ctx = ctx;
-
-                    // Адаптивные размеры для высокого DPI
-                    const dpr = chartState.devicePixelRatio;
-                    const rect = canvas.getBoundingClientRect();
-
-                    canvas.width = rect.width * dpr;
-                    canvas.height = rect.height * dpr;
-
-                    ctx.scale(dpr, dpr);
-                    canvas.style.width = rect.width + 'px';
-                    canvas.style.height = rect.height + 'px';
-
-                    // Проверка наличия данных
-                    if (!chartData || !chartData.dates || chartData.dates.length === 0) {
-                        chartState.noDataMessage.style.display = 'block';
-                        return;
-                    } else {
-                        chartState.noDataMessage.style.display = 'none';
-                    }
-
-                    // Рассчитываем оптимальные отступы
-                    chartState.layout.padding = calculateOptimalPadding();
-                    const padding = chartState.layout.padding;
-
-                    const graphWidth = rect.width - padding.left - padding.right;
-                    const graphHeight = rect.height - padding.top - padding.bottom;
-
-                    chartState.layout.graphArea = {
-                        x: padding.left,
-                        y: padding.top,
-                        width: graphWidth,
-                        height: graphHeight
-                    };
-
-                    // Очистка canvas
-                    ctx.clearRect(0, 0, rect.width, rect.height);
-
-                    // Находим максимальные значения для масштабирования
-                    let maxSilver = 0;
-
-                    for (let i = 0; i < chartData.dates.length; i++) {
-                        const silver = chartData.silver_collected[i] || 0;
-                        maxSilver = Math.max(maxSilver, silver);
-                    }
-
-                    // Защита от нулевых максимумов
-                    maxSilver = maxSilver || 10;
-
-                    // Округляем maxSilver до ближайшего большего "красивого" числа
-                    maxSilver = calculateAxisMaxValue(maxSilver);
-
-                    // Рисуем оси и сетку
-                    drawAxes(ctx, padding, graphWidth, graphHeight, maxSilver, rect.width, rect.height);
-
-                    // Сбрасываем массивы элементов для интерактивности
-                    chartState.bars = [];
-
-                    // Отрисовка столбцов серебра с учетом анимации
-                    drawBars(ctx, padding, graphWidth, graphHeight, maxSilver, rect.width, rect.height, animationProgress);
-                }
-
-                function calculateAxisMaxValue(value) {
-                    // Округляем до ближайшего большего "красивого" числа для оси
-                    // Для чисел серебра, которые обычно в K (тысячах)
-                    if (value <= 5) return 5;
-                    if (value <= 10) return 10;
-                    if (value <= 25) return 25;
-                    if (value <= 50) return 50;
-                    if (value <= 100) return 100;
-
-                    // Для больших чисел, округляем до ближайшей сотни или тысячи
-                    const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
-                    return Math.ceil(value / magnitude) * magnitude;
-                }
-
-                function drawAxes(ctx, padding, graphWidth, graphHeight, maxSilver, canvasWidth, canvasHeight) {
-                    const baselineY = canvasHeight - padding.bottom;
-                    const baselineX = padding.left;
-                    const fontSize = getOptimalFontSize();
-
-                    // Фон области графика (полупрозрачный)
-                    ctx.fillStyle = 'rgba(20, 26, 47, 0.5)';
-                    ctx.fillRect(padding.left, padding.top, graphWidth, graphHeight);
-
-                    // Отрисовка сетки
-                    ctx.strokeStyle = 'rgba(40, 48, 77, 0.8)';
-                    ctx.lineWidth = 0.8;
-                    ctx.beginPath();
-
-                    // Определяем интервалы для шкалы серебра
-                    const silverStep = calculateAxisStep(maxSilver);
-                    const numSilverLines = Math.floor(maxSilver / silverStep) + 1;
-
-                    // Горизонтальные линии сетки (шкала серебра)
-                    for (let i = 0; i < numSilverLines; i++) {
-                        const value = i * silverStep;
-                        const y = baselineY - (value / maxSilver) * graphHeight;
-
-                        ctx.moveTo(baselineX, y);
-                        ctx.lineTo(baselineX + graphWidth, y);
-
-                        // Подпись значения оси Y (серебро) - ИЗМЕНЕНО: используем formatSilverValue
-                        if (canvasWidth > 300) {
-                            ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
-                            ctx.font = `${fontSize}px Arial`;
-                            ctx.textAlign = 'right';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(formatSilverValue(value), baselineX - 5, y);
-                        }
-                    }
-
-                    // Вертикальные линии сетки и подписи дат
-                    const dataLength = chartData.dates.length;
-                    const availableWidth = graphWidth / dataLength;
-                    let skipFactor = 1;
-
-                    // Определяем, нужно ли пропускать даты
-                    if (availableWidth < 50) skipFactor = 2;
-                    if (availableWidth < 30) skipFactor = 3;
-
-                    for (let i = 0; i < dataLength; i++) {
-                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
-
-                        // Рисуем вертикальную линию сетки
-                        ctx.moveTo(x, padding.top);
-                        ctx.lineTo(x, baselineY);
-
-                        // Подпись даты (пропускаем некоторые для экономии места)
-                        if (i % skipFactor === 0 || i === dataLength - 1) {
-                            ctx.fillStyle = 'rgba(155, 160, 188, 0.9)';
-                            ctx.font = `${fontSize}px Arial`;
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'top';
-                            ctx.fillText(chartData.dates[i], x, baselineY + 5);
-                        }
-                    }
-
-                    ctx.stroke();
-
-                    // Горизонтальная базовая линия
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(155, 160, 188, 0.3)';
-                    ctx.lineWidth = 1;
-                    ctx.moveTo(padding.left, baselineY);
-                    ctx.lineTo(padding.left + graphWidth, baselineY);
-                    ctx.stroke();
-                }
-
-                function drawBars(ctx, padding, graphWidth, graphHeight, maxSilver, canvasWidth, canvasHeight, animationProgress) {
-                    const baselineY = canvasHeight - padding.bottom;
-                    const dataLength = chartData.dates.length;
-
-                    // Вычисляем оптимальную ширину столбцов (можем сделать их шире, т.к. только один тип столбцов)
-                    const maxBarWidth = 60;
-                    let barWidth = Math.min((graphWidth / dataLength) * 0.8, maxBarWidth);
-
-                    for (let i = 0; i < dataLength; i++) {
-                        const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
-                        const barX = x - (barWidth / 2);
-
-                        const silver = chartData.silver_collected[i] || 0;
-
-                        // Вычисляем высоту столбца с учетом анимации
-                        const silverHeight = (silver / maxSilver) * graphHeight * animationProgress;
-
-                        // Создаем градиент для столбца серебра
-                        const silverGradient = ctx.createLinearGradient(0, baselineY - silverHeight, 0, baselineY);
-                        silverGradient.addColorStop(0, 'rgba(63, 224, 200, 1)');    // Ярче вверху
-                        silverGradient.addColorStop(1, 'rgba(63, 224, 200, 0.7)');  // Более прозрачный внизу
-
-                        // Рисуем столбец серебра
-                        ctx.fillStyle = silverGradient;
-                        const silverRect = {
-                            x: barX,
-                            y: baselineY - silverHeight,
-                            width: barWidth,
-                            height: Math.max(1, silverHeight),
-                            value: silver,
-                            date: chartData.dates[i],
-                            index: i
-                        };
-
-                        // Скругленные углы для верхней части
-                        const radius = Math.min(4, barWidth / 4);
-
-                        // Рисуем столбец со скругленными углами вверху
-                        ctx.beginPath();
-                        ctx.moveTo(silverRect.x + radius, silverRect.y);
-                        ctx.lineTo(silverRect.x + silverRect.width - radius, silverRect.y);
-                        ctx.quadraticCurveTo(silverRect.x + silverRect.width, silverRect.y, silverRect.x + silverRect.width, silverRect.y + radius);
-                        ctx.lineTo(silverRect.x + silverRect.width, silverRect.y + silverRect.height);
-                        ctx.lineTo(silverRect.x, silverRect.y + silverRect.height);
-                        ctx.lineTo(silverRect.x, silverRect.y + radius);
-                        ctx.quadraticCurveTo(silverRect.x, silverRect.y, silverRect.x + radius, silverRect.y);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        // Добавляем блик на столбце
-                        const highlightWidth = barWidth * 0.4;
-                        const highlightGradient = ctx.createLinearGradient(
-                            silverRect.x + barWidth * 0.3, silverRect.y,
-                            silverRect.x + barWidth * 0.3 + highlightWidth, silverRect.y
-                        );
-                        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
-                        highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-                        ctx.fillStyle = highlightGradient;
-                        ctx.beginPath();
-                        ctx.moveTo(silverRect.x + barWidth * 0.3, silverRect.y);
-                        ctx.lineTo(silverRect.x + barWidth * 0.3 + highlightWidth, silverRect.y);
-                        ctx.lineTo(silverRect.x + barWidth * 0.3 + highlightWidth, silverRect.y + silverRect.height);
-                        ctx.lineTo(silverRect.x + barWidth * 0.3, silverRect.y + silverRect.height);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        chartState.bars.push(silverRect);
-                    }
-                }
-
-                function checkForInteractions(event) {
-                    const canvas = chartState.canvas;
-                    const rect = canvas.getBoundingClientRect();
-                    const x = event.clientX - rect.left;
-                    const y = event.clientY - rect.top;
-
-                    chartState.mouse = { x, y };
-
-                    // Проверяем наведение на столбцы
-                    let hoveredBar = null;
-                    for (const bar of chartState.bars) {
-                        if (
-                            x >= bar.x && 
-                            x <= bar.x + bar.width && 
-                            y >= bar.y && 
-                            y <= bar.y + bar.height
-                        ) {
-                            hoveredBar = bar;
-                            break;
-                        }
-                    }
-
-                    // Обновляем подсказку
-                    if (hoveredBar) {
-                        const tooltip = chartState.tooltip;
-                        tooltip.style.display = 'block';
-
-                        // Позиционируем подсказку, чтобы она не выходила за границы экрана
-                        let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
-                        let tooltipY = Math.max(y - 10, 10);
-
-                        // Если подсказка слишком низко, показываем ее выше
-                        if (y > canvas.clientHeight - 80) {
-                            tooltipY = y - 70;
-                        }
-
-                        tooltip.style.left = tooltipX + 'px';
-                        tooltip.style.top = tooltipY + 'px';
-
-                        // ИЗМЕНЕНО: используем функцию formatSilverValue
-                        const valueText = formatSilverValue(hoveredBar.value);
-
-                        // Улучшенное форматирование подсказки
-                        tooltip.innerHTML = `
-                            <strong>${hoveredBar.date}</strong>
-                            Собрано серебра: ${valueText}
-                        `;
-                    } else {
-                        chartState.tooltip.style.display = 'none';
-                    }
-
-                    // Обновляем состояние графика
-                    chartState.hoveredBar = hoveredBar;
-                }
-
-                function calculateAxisStep(maxValue) {
-                    // Помогает определить удобный шаг для оси
-                    if (maxValue <= 5) return 1;
-                    if (maxValue <= 10) return 2;
-                    if (maxValue <= 25) return 5;
-                    if (maxValue <= 50) return 10;
-                    if (maxValue <= 100) return 20;
-                    if (maxValue <= 200) return 50;
-                    if (maxValue <= 500) return 100;
-                    if (maxValue <= 1000) return 200;
-
-                    // Для больших значений
-                    const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
-                    return Math.ceil(maxValue / 5 / magnitude) * magnitude;
-                }
-
-                function animateChart(timestamp) {
-                    if (!chartState.animation.isAnimating) return;
-
-                    if (!chartState.animation.startTime) {
-                        chartState.animation.startTime = timestamp;
-                    }
-
-                    const elapsed = timestamp - chartState.animation.startTime;
-                    const duration = ANIMATION_DURATION;
-
-                    // Рассчитываем прогресс анимации (от 0 до 1) с эффектом ease-out
-                    let progress = elapsed / duration;
-                    progress = Math.min(1, progress);
-
-                    // Применяем кривую плавности (ease-out)
-                    const animationProgress = 1 - Math.pow(1 - progress, 3);
-
-                    // Обновляем график с текущим прогрессом анимации
-                    drawChart(animationProgress);
-
-                    if (progress < 1) {
-                        // Если анимация не завершена, запрашиваем следующий кадр
-                        requestAnimationFrame(animateChart);
-                    } else {
-                        // Анимация завершена
-                        chartState.animation.isAnimating = false;
-                    }
-                }
-
-                // Обработчики событий
-                function setupEventListeners() {
-                    const canvas = document.getElementById('silver-chart');
-
-                    canvas.addEventListener('mousemove', checkForInteractions);
-
-                    canvas.addEventListener('mouseleave', function() {
-                        chartState.tooltip.style.display = 'none';
-                    });
-
-                    // Обработка изменения размера
-                    window.addEventListener('resize', function() {
-                        // При изменении размера перерисовываем без анимации
-                        drawChart(1);
-                    });
-                }
-
-                // Инициализация с анимацией
-                window.onload = function() {
-                    setupEventListeners();
-
-                    // Проверяем, нужно ли включать анимацию
-                    if (ENABLE_ANIMATIONS) {
-                        chartState.animation.isAnimating = true;
-                        requestAnimationFrame(animateChart);
-                    } else {
-                        // Рисуем график сразу полностью без анимации
-                        drawChart(1);
-                    }
-                };
-            </script>
-        </body>
-        </html>
-        """
-
-        try:
-            # Создаем временный файл
-            import tempfile
-            import os
-            fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix="aom_silver_chart_")
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-
-            self._py_logger.debug(f"Создан шаблон графика серебра: {self.html_path}")
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при создании HTML-шаблона графика серебра: {e}")
-
-    def update_chart(self, trend_data, force_no_animation=False):
-        """Обновляет график новыми данными."""
-        if not trend_data or not self.html_path:
-            self._py_logger.warning("Невозможно обновить график: нет данных или шаблона")
-            return
-
-        try:
-            # Вызываем родительский метод для логики анимации
-            super().update_chart(trend_data, force_no_animation)
-
-            # Чтение текущего HTML
-            with open(self.html_path, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-
-            # Проверка данных
-            if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
-                self._py_logger.warning("Пустой набор данных для графика серебра")
-                trend_data = {
-                    "dates": [],
-                    "silver_collected": []
-                }
-
-            # Подготовка данных для JSON
-            import json
-            json_data = json.dumps(trend_data)
-
-            # Определяем, нужна ли анимация на основе новой логики
-            enable_animation = self.should_animate(force_no_animation)
-
-            # Замена плейсхолдеров данными
-            updated_html = html_content.replace('CHART_DATA_PLACEHOLDER', json_data)
-            updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER', 'true' if enable_animation else 'false')
-
-            # Запись обновленного HTML
-            with open(self.html_path, 'w', encoding='utf-8') as f:
-                f.write(updated_html)
-
-            # Принудительная очистка кэша WebView только при анимации
-            if enable_animation:
-                try:
-                    self.web_view.page().profile().clearHttpCache()
-                except Exception as cache_error:
-                    self._py_logger.debug(f"Не удалось очистить кэш WebView: {cache_error}")
-
-            # Загрузка обновленного HTML в WebView
-            from PyQt6.QtCore import QUrl
-            self.web_view.load(QUrl.fromLocalFile(self.html_path))
-
-            animation_status = "с анимацией" if enable_animation else "без анимации"
-            self._py_logger.debug(
-                f"График серебра обновлен {animation_status}, точек данных: {len(trend_data.get('dates', []))}")
-
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")
-
-    def clear(self):
-        """Очищает график."""
-        empty_data = {
-            "dates": [],
-            "silver_collected": []
-        }
-        self.update_chart(empty_data)
+        super().__init__(ChartConfig.SILVER, parent)
