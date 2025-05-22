@@ -136,14 +136,15 @@ class UpdateManager:
 
         if self.bot_engine.running.is_set():
             try:
-                # ВАЖНО: Для автоматических обновлений ВСЕГДА используем force_no_animation=True
+                # ВАЖНО: Для автоматических обновлений ВСЕГДА БЕЗ анимации
                 stats_widget = self.main_window.stats_widget
 
                 # Обновляем только если виджет видимый
                 if hasattr(stats_widget, '_is_currently_visible') and stats_widget._is_currently_visible:
                     # Используем внутренний метод обновления графиков с проверкой изменений
                     if hasattr(stats_widget, 'updater') and stats_widget.updater:
-                        stats_widget.updater.update_trend_charts(allow_animation=False)
+                        # ИСПРАВЛЕНО: используем правильный параметр enable_animation=False
+                        stats_widget.updater.update_trend_charts(enable_animation=False)
 
                     # Обновляем карточки и таблицы
                     stats_widget.update_stats_cards()
@@ -467,9 +468,11 @@ class MainWindow(QMainWindow):
 
         # Специальная обработка для страницы статистики
         if page_id == "stats":
-            self._setup_stats_animation()
+            # ВАЖНО: устанавливаем флаг переключения вкладки для включения анимации
+            self.stats_widget.set_tab_switched(True)
+
             # Обновляем статистику с анимацией при ручном переходе
-            QTimer.singleShot(100, lambda: self.stats_widget.refresh_statistics(allow_animation=True))
+            QTimer.singleShot(100, lambda: self.stats_widget.refresh_statistics(enable_animation=True))
             self._py_logger.debug("Переход на страницу статистики с анимацией")
 
         # Настраиваем частоту обновлений

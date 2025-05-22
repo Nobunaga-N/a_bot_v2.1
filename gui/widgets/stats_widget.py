@@ -175,7 +175,7 @@ class ComponentUpdater:
         return False
 
     @handle_stats_errors()
-    def update_trend_charts(self, trend_data=None, allow_animation=False, force_reload=False, force_update=False):
+    def update_trend_charts(self, trend_data=None, enable_animation=False, force_reload=False, force_update=False):
         """Обновляет графики трендов."""
         if trend_data is None:
             trend_data = self.data_provider.get_trend_data(force_reload=force_reload)
@@ -190,8 +190,6 @@ class ComponentUpdater:
             self._py_logger.debug("Данные графиков не изменились, обновление пропущено")
             return
 
-        force_no_animation = not allow_animation
-
         # Обновляем все графики
         chart_configs = [
             (self.widget.battles_chart_widget, "график боев"),
@@ -201,8 +199,9 @@ class ComponentUpdater:
 
         for chart_widget, chart_name in chart_configs:
             try:
-                chart_widget.update_chart(trend_data, force_no_animation=force_no_animation)
-                animation_status = "с анимацией" if allow_animation else "без анимации"
+                # ВАЖНО: передаем правильный параметр для управления анимацией
+                chart_widget.update_chart(trend_data, force_no_animation=not enable_animation)
+                animation_status = "с анимацией" if enable_animation else "без анимации"
                 self._py_logger.debug(f"Обновлен {chart_name} {animation_status}: {len(trend_data['dates'])} точек")
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении {chart_name}: {e}")
@@ -265,6 +264,9 @@ class StatsWidget(QWidget):
         # Флаги состояния
         self._last_tab_visit_time = 0
         self._is_currently_visible = False
+
+        # НОВЫЙ ФЛАГ: отслеживает переключения вкладок
+        self._tab_switched = False
 
         # Инициализация UI
         self.init_ui()
@@ -467,6 +469,13 @@ class StatsWidget(QWidget):
         daily_stats_layout_frame.addWidget(self.daily_stats_table, 1)
         daily_stats_layout.addWidget(daily_stats_frame, 1)
 
+    # НОВЫЙ МЕТОД: устанавливает флаг переключения вкладок
+    def set_tab_switched(self, switched=True):
+        """Устанавливает флаг переключения вкладок для включения анимации."""
+        self._tab_switched = switched
+        if switched:
+            self._py_logger.debug("Флаг переключения вкладки установлен - анимация будет включена")
+
     def auto_refresh_statistics(self):
         """Автоматически обновляет статистику с текущей сессией."""
         if not self.bot_engine.running.is_set():
@@ -481,10 +490,10 @@ class StatsWidget(QWidget):
             self.updater.update_stats_cards()
             self.updater.update_daily_stats_table()
 
-            # Графики обновляем только если данные изменились (автоматически без анимации)
-            self.updater.update_trend_charts(allow_animation=False)
+            # Графики обновляем БЕЗ анимации при автоматическом обновлении
+            self.updater.update_trend_charts(enable_animation=False)
 
-            self._py_logger.debug("Автоматическое обновление статистики выполнено")
+            self._py_logger.debug("Автоматическое обновление статистики выполнено без анимации")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при автоматическом обновлении статистики: {e}")
@@ -492,11 +501,11 @@ class StatsWidget(QWidget):
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
         self._py_logger.info(f"Изменение периода статистики на: {self.data_provider.current_period}")
-        # При смене периода принудительно обновляем данные
-        self.refresh_statistics(force_reload=True, allow_animation=True)
+        # При смене периода БЕЗ анимации (это не переключение вкладок)
+        self.refresh_statistics(force_reload=True, enable_animation=False)
 
     @handle_stats_errors()
-    def refresh_statistics(self, show_message=False, allow_animation=None, force_reload=False):
+    def refresh_statistics(self, show_message=False, enable_animation=None, force_reload=False):
         """Обновляет все отображения статистики."""
         if not self.data_provider.stats_manager:
             self._py_logger.warning("StatsManager недоступен")
@@ -506,20 +515,29 @@ class StatsWidget(QWidget):
             if show_message:
                 self._py_logger.debug("Обновление статистики запущено...")
 
-            # Определяем, нужна ли анимация (по умолчанию только для ручных обновлений)
-            enable_animation = allow_animation if allow_animation is not None else False
+            # Определяем, нужна ли анимация
+            should_animate = False
+            if enable_animation is not None:
+                # Если явно передан параметр, используем его
+                should_animate = enable_animation
+            elif self._tab_switched:
+                # Если установлен флаг переключения вкладок, включаем анимацию
+                should_animate = True
+                self._tab_switched = False  # Сбрасываем флаг после использования
+                self._py_logger.debug("Анимация включена из-за переключения вкладки")
 
             # Обновляем все компоненты
             self.updater.update_stats_cards(force_reload=force_reload)
             self.updater.update_trend_charts(
-                allow_animation=enable_animation,
+                enable_animation=should_animate,
                 force_reload=force_reload,
                 force_update=force_reload  # Принудительное обновление при перезагрузке
             )
             self.updater.update_daily_stats_table(force_reload=force_reload)
 
             if show_message:
-                self._py_logger.debug("Обновление статистики завершено успешно")
+                animation_status = "с анимацией" if should_animate else "без анимации"
+                self._py_logger.debug(f"Обновление статистики завершено успешно {animation_status}")
 
             self.request_refresh.emit()
 
@@ -535,7 +553,8 @@ class StatsWidget(QWidget):
     def update_trend_charts(self, trend_data=None, allow_animation=False):
         """Публичный метод для обновления графиков."""
         if self.updater:
-            self.updater.update_trend_charts(trend_data, allow_animation, force_update=True)
+            # ВНИМАНИЕ: исправляем параметр для совместимости
+            self.updater.update_trend_charts(trend_data, enable_animation=allow_animation, force_update=True)
 
     def update_daily_stats_table(self, daily_stats=None):
         """Публичный метод для обновления таблицы."""
@@ -546,20 +565,7 @@ class StatsWidget(QWidget):
         """Обработчик события показа виджета статистики."""
         super().showEvent(event)
         self._is_currently_visible = True
-
-        # Настройка анимации для графиков
-        for chart_widget in [self.battles_chart_widget, self.keys_chart_widget, self.silver_chart_widget]:
-            if hasattr(chart_widget, 'should_animate_next'):
-                chart_widget.should_animate_next = True
-                chart_widget.has_animated_since_show = False
-
-        self._py_logger.debug("Вкладка статистики показана, анимация включена")
-
-        # Обновляем статистику с анимацией при показе вкладки
-        current_time = time.time()
-        if current_time - self._last_tab_visit_time > 1:  # Защита от множественных вызовов
-            self._last_tab_visit_time = current_time
-            self.refresh_statistics(allow_animation=True)
+        self._py_logger.debug("Вкладка статистики показана")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""

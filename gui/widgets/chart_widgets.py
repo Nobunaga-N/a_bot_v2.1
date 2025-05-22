@@ -136,14 +136,6 @@ class ResponsiveChartWidget(QWidget):
         self.legend_layout.addStretch()
         self.layout.addLayout(self.legend_layout)
 
-        # Флаги для управления анимацией
-        self.should_animate_next = False
-        self.is_tab_visible = False
-        self.has_animated_since_show = False
-
-        # Временный HTML-файл для графика
-        self.html_path = None
-
         # Таймер для оптимизации отрисовки при изменении размера
         self.resize_timer = QTimer()
         self.resize_timer.setSingleShot(True)
@@ -151,6 +143,9 @@ class ResponsiveChartWidget(QWidget):
 
         # Переменная для хранения последних данных
         self.last_data = None
+
+        # Временный HTML-файл для графика
+        self.html_path = None
 
         # Создать HTML шаблон
         self.create_html_template()
@@ -800,15 +795,6 @@ class ResponsiveChartWidget(QWidget):
         except Exception as e:
             self._py_logger.error(f"Ошибка при создании HTML-шаблона: {e}")
 
-        try:
-            fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix=f"aom_{self.config['type']}_chart_")
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-
-            self._py_logger.debug(f"Создан шаблон графика {self.title}: {self.html_path}")
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при создании HTML-шаблона: {e}")
-
     def resizeEvent(self, event):
         """Обработчик изменения размера виджета."""
         super().resizeEvent(event)
@@ -826,34 +812,6 @@ class ResponsiveChartWidget(QWidget):
             finally:
                 self._is_currently_updating = False
 
-    def showEvent(self, event):
-        """Обработчик события показа виджета."""
-        super().showEvent(event)
-        self.is_tab_visible = True
-        if not self.has_animated_since_show:
-            self.should_animate_next = True
-            self._py_logger.debug(f"График {self.title}: разрешена анимация для следующего обновления")
-
-    def hideEvent(self, event):
-        """Обработчик события скрытия виджета."""
-        super().hideEvent(event)
-        self.is_tab_visible = False
-        self.has_animated_since_show = False
-        self._py_logger.debug(f"График {self.title}: сброшен флаг анимации при скрытии")
-
-    def should_animate(self, force_no_animation=False):
-        """Определяет, нужно ли включать анимацию для текущего обновления."""
-        if force_no_animation:
-            return False
-
-        if self.should_animate_next and self.is_tab_visible:
-            self.should_animate_next = False
-            self.has_animated_since_show = True
-            self._py_logger.debug(f"График {self.title}: включена анимация")
-            return True
-
-        return False
-
     def update_chart(self, data, force_no_animation=False):
         """Обновляет график новыми данными."""
         if not data or not self.html_path:
@@ -862,7 +820,9 @@ class ResponsiveChartWidget(QWidget):
 
         try:
             self.last_data = data
-            enable_animation = self.should_animate(force_no_animation)
+
+            # УПРОЩЕННАЯ ЛОГИКА: анимация включается только когда force_no_animation=False
+            enable_animation = not force_no_animation
 
             # Чтение базового HTML шаблона
             with open(self.html_path, 'r', encoding='utf-8') as f:
