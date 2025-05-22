@@ -220,6 +220,8 @@ class ResponsiveChartWidget(QWidget):
                     z-index: 100;
                     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
                     transition: all 0.1s ease;
+                    max-width: 200px;
+                    word-wrap: break-word;
                 }}
 
                 .tooltip strong {{
@@ -520,8 +522,10 @@ class ResponsiveChartWidget(QWidget):
                         const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
                         const barX = x - halfBarWidth;
 
-                        const victories = chartData.victories[i] || 0;
-                        const defeats = chartData.defeats[i] || 0;
+                        // Получаем актуальные данные из chartData
+                        const victories = chartData.victories ? (chartData.victories[i] || 0) : 0;
+                        const defeats = chartData.defeats ? (chartData.defeats[i] || 0) : 0;
+                        const date = chartData.dates ? chartData.dates[i] : '';
 
                         const victoryHeight = (victories / maxValue) * graphHeight * animationProgress;
                         const defeatHeight = (defeats / maxValue) * graphHeight * animationProgress;
@@ -539,7 +543,7 @@ class ResponsiveChartWidget(QWidget):
                             height: Math.max(1, victoryHeight),
                             type: 'victory',
                             value: victories,
-                            date: chartData.dates[i],
+                            date: date,
                             index: i
                         }};
 
@@ -559,7 +563,7 @@ class ResponsiveChartWidget(QWidget):
                             height: Math.max(1, defeatHeight),
                             type: 'defeat',
                             value: defeats,
-                            date: chartData.dates[i],
+                            date: date,
                             index: i
                         }};
 
@@ -581,7 +585,9 @@ class ResponsiveChartWidget(QWidget):
                         const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
                         const barX = x - (barWidth / 2);
 
-                        const value = chartData[dataKey][i] || 0;
+                        // Получаем актуальные данные из chartData
+                        const value = chartData[dataKey] ? (chartData[dataKey][i] || 0) : 0;
+                        const date = chartData.dates ? chartData.dates[i] : '';
                         const barHeight = (value / maxValue) * graphHeight * animationProgress;
 
                         const gradient = ctx.createLinearGradient(0, baselineY - barHeight, 0, baselineY);
@@ -595,7 +601,7 @@ class ResponsiveChartWidget(QWidget):
                             width: barWidth,
                             height: Math.max(1, barHeight),
                             value: value,
-                            date: chartData.dates[i],
+                            date: date,
                             index: i
                         }};
 
@@ -645,6 +651,10 @@ class ResponsiveChartWidget(QWidget):
 
                 function checkForInteractions(event) {{
                     const canvas = chartState.canvas;
+                    if (!canvas || !chartState.bars || chartState.bars.length === 0) {{
+                        return;
+                    }}
+
                     const rect = canvas.getBoundingClientRect();
                     const x = event.clientX - rect.left;
                     const y = event.clientY - rect.top;
@@ -652,6 +662,8 @@ class ResponsiveChartWidget(QWidget):
                     chartState.mouse = {{ x, y }};
 
                     let hoveredBar = null;
+
+                    // Ищем бар под курсором
                     for (const bar of chartState.bars) {{
                         if (x >= bar.x && x <= bar.x + bar.width && y >= bar.y && y <= bar.y + bar.height) {{
                             hoveredBar = bar;
@@ -659,10 +671,13 @@ class ResponsiveChartWidget(QWidget):
                         }}
                     }}
 
-                    if (hoveredBar) {{
+                    if (hoveredBar && hoveredBar !== chartState.hoveredBar) {{
                         const tooltip = chartState.tooltip;
+                        if (!tooltip) return;
+
                         tooltip.style.display = 'block';
 
+                        // Позиционирование тултипа с учетом границ экрана
                         let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
                         let tooltipY = Math.max(y - 10, 10);
 
@@ -673,21 +688,32 @@ class ResponsiveChartWidget(QWidget):
                         tooltip.style.left = tooltipX + 'px';
                         tooltip.style.top = tooltipY + 'px';
 
+                        // Получаем актуальные данные для тултипа
                         const formatter = formatters[CONFIG.formatter];
                         const valueText = formatter(hoveredBar.value);
 
+                        // Форматируем контент тултипа в зависимости от типа графика
                         if (CONFIG.type === 'dual_bars') {{
                             const typeText = hoveredBar.type === 'victory' ? 'Победы' : 'Поражения';
                             tooltip.innerHTML = `<strong>${{hoveredBar.date}}</strong>${{typeText}}: ${{valueText}}`;
                         }} else {{
-                            const label = CONFIG.data_keys[0] === 'keys_collected' ? 'Собрано ключей' : 'Собрано серебра';
+                            let label = 'Значение';
+                            if (CONFIG.data_keys[0] === 'keys_collected') {{
+                                label = 'Собрано ключей';
+                            }} else if (CONFIG.data_keys[0] === 'silver_collected') {{
+                                label = 'Собрано серебра';
+                            }}
                             tooltip.innerHTML = `<strong>${{hoveredBar.date}}</strong>${{label}}: ${{valueText}}`;
                         }}
-                    }} else {{
-                        chartState.tooltip.style.display = 'none';
-                    }}
 
-                    chartState.hoveredBar = hoveredBar;
+                        chartState.hoveredBar = hoveredBar;
+                    }} else if (!hoveredBar && chartState.hoveredBar) {{
+                        // Скрываем тултип если курсор вне всех баров
+                        if (chartState.tooltip) {{
+                            chartState.tooltip.style.display = 'none';
+                        }}
+                        chartState.hoveredBar = null;
+                    }}
                 }}
 
                 function animateChart(timestamp) {{
@@ -713,14 +739,41 @@ class ResponsiveChartWidget(QWidget):
                 function setupEventListeners() {{
                     const canvas = document.getElementById(CONFIG.chart_id);
 
-                    canvas.addEventListener('mousemove', checkForInteractions);
-                    canvas.addEventListener('mouseleave', function() {{
-                        chartState.tooltip.style.display = 'none';
-                    }});
+                    // Удаляем старые обработчики если они есть
+                    if (canvas._chartMouseMoveHandler) {{
+                        canvas.removeEventListener('mousemove', canvas._chartMouseMoveHandler);
+                    }}
+                    if (canvas._chartMouseLeaveHandler) {{
+                        canvas.removeEventListener('mouseleave', canvas._chartMouseLeaveHandler);
+                    }}
+                    if (window._chartResizeHandler) {{
+                        window.removeEventListener('resize', window._chartResizeHandler);
+                    }}
 
-                    window.addEventListener('resize', function() {{
-                        drawChart(1);
-                    }});
+                    // Создаем новые обработчики
+                    canvas._chartMouseMoveHandler = function(event) {{
+                        checkForInteractions(event);
+                    }};
+
+                    canvas._chartMouseLeaveHandler = function() {{
+                        if (chartState.tooltip) {{
+                            chartState.tooltip.style.display = 'none';
+                        }}
+                        chartState.hoveredBar = null;
+                    }};
+
+                    window._chartResizeHandler = function() {{
+                        // Добавляем небольшую задержку для стабилизации размера
+                        clearTimeout(window._resizeTimeout);
+                        window._resizeTimeout = setTimeout(function() {{
+                            drawChart(1);
+                        }}, 100);
+                    }};
+
+                    // Добавляем новые обработчики
+                    canvas.addEventListener('mousemove', canvas._chartMouseMoveHandler);
+                    canvas.addEventListener('mouseleave', canvas._chartMouseLeaveHandler);
+                    window.addEventListener('resize', window._chartResizeHandler);
                 }}
 
                 window.onload = function() {{
@@ -737,6 +790,15 @@ class ResponsiveChartWidget(QWidget):
         </body>
         </html>
         """
+
+        try:
+            fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix=f"aom_{self.config['type']}_chart_")
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+
+            self._py_logger.debug(f"Создан шаблон графика {self.title}: {self.html_path}")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при создании HTML-шаблона: {e}")
 
         try:
             fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix=f"aom_{self.config['type']}_chart_")
@@ -802,7 +864,7 @@ class ResponsiveChartWidget(QWidget):
             self.last_data = data
             enable_animation = self.should_animate(force_no_animation)
 
-            # Чтение и обновление HTML
+            # Чтение базового HTML шаблона
             with open(self.html_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
 
@@ -819,24 +881,65 @@ class ResponsiveChartWidget(QWidget):
             updated_html = updated_html.replace('ENABLE_ANIMATION_PLACEHOLDER',
                                                 'true' if enable_animation else 'false')
 
-            # Запись и загрузка
-            with open(self.html_path, 'w', encoding='utf-8') as f:
-                f.write(updated_html)
+            # Добавляем уникальный идентификатор для обновления, чтобы избежать кэширования
+            import time
+            update_id = int(time.time() * 1000)  # Миллисекунды для уникальности
 
-            if enable_animation:
-                try:
-                    self.web_view.page().profile().clearHttpCache()
-                except Exception:
-                    pass
+            # Добавляем скрипт для принудительного обновления данных и обработчиков
+            additional_script = f"""
+            <script>
+            // Уникальный ID обновления: {update_id}
+            window.chartUpdateId = {update_id};
 
-            self.web_view.load(QUrl.fromLocalFile(self.html_path))
+            // Принудительно очищаем старые обработчики
+            window.addEventListener('load', function() {{
+                // Небольшая задержка для полной загрузки
+                setTimeout(function() {{
+                    // Обновляем данные принудительно
+                    if (typeof chartData !== 'undefined' && typeof drawChart === 'function') {{
+                        // Очищаем старое состояние
+                        if (typeof chartState !== 'undefined') {{
+                            chartState.bars = [];
+                            chartState.hoveredBar = null;
+                            if (chartState.tooltip) {{
+                                chartState.tooltip.style.display = 'none';
+                            }}
+                        }}
+
+                        // Перерисовываем график с новыми данными
+                        drawChart(1);
+
+                        // Переустанавливаем обработчики событий
+                        setupEventListeners();
+                    }}
+                }}, 50);
+            }});
+            </script>
+            """
+
+            # Вставляем дополнительный скрипт перед закрывающим тегом body
+            updated_html = updated_html.replace('</body>', additional_script + '</body>')
+
+            # Принудительно очищаем кэш профиля браузера
+            try:
+                profile = self.web_view.page().profile()
+                profile.clearHttpCache()
+                profile.clearAllVisitedLinks()
+            except Exception as e:
+                self._py_logger.debug(f"Не удалось очистить кэш браузера: {e}")
+
+            # Используем setHtml вместо load для избежания проблем с кэшированием файлов
+            base_url = QUrl.fromLocalFile(os.path.dirname(self.html_path) + "/")
+            self.web_view.setHtml(updated_html, base_url)
 
             animation_status = "с анимацией" if enable_animation else "без анимации"
             self._py_logger.debug(
-                f"График {self.title} обновлен {animation_status}, точек данных: {len(data.get('dates', []))}")
+                f"График {self.title} обновлен {animation_status} (ID: {update_id}), точек данных: {len(data.get('dates', []))}")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении графика {self.title}: {e}")
+            import traceback
+            self._py_logger.debug(traceback.format_exc())
 
     def clear(self):
         """Очищает график."""
