@@ -454,7 +454,7 @@ class StatsWidget(QWidget):
                 # Обновляем интерфейс, чтобы изменения стали видны
                 QApplication.processEvents()
 
-            # Логируем начало обновления (изменено с INFO на DEBUG)
+            # Логируем начало обновления
             if show_message:
                 self._py_logger.debug("Обновление статистики запущено...")
 
@@ -493,9 +493,9 @@ class StatsWidget(QWidget):
                 current_session_stats
             )
 
-            # ИЗМЕНЕНО: Обновляем графики БЕЗ принудительной анимации при refresh
-            # Анимация будет только при первом показе вкладки
-            self.update_trend_charts(trend_data)
+            # ИСПРАВЛЕНО: Обновляем графики, при этом анимация будет включена только если установлены флаги
+            # force_no_animation=False позволит графикам самим решить, нужна ли анимация
+            self.update_trend_charts(trend_data, allow_animation=True)
 
             # Получаем ежедневную статистику
             daily_stats = self.bot_engine.stats_manager.get_daily_stats_with_current_session(
@@ -506,7 +506,7 @@ class StatsWidget(QWidget):
             self.update_daily_stats_table(daily_stats)
 
             if show_message:
-                self._py_logger.debug("Обновление статистики завершено успешно")  # Изменено с INFO на DEBUG
+                self._py_logger.debug("Обновление статистики завершено успешно")
 
             if loading_animation:
                 # Восстанавливаем текст и доступность кнопок
@@ -539,12 +539,13 @@ class StatsWidget(QWidget):
                         original_text if 'original_text' in locals() else "🔄 Обновить статистику")
                     self.refresh_daily_stats_button.setEnabled(True)
 
-    def update_trend_charts(self, trend_data=None):
+    def update_trend_charts(self, trend_data=None, allow_animation=False):
         """
-        Обновляет графики трендов с последними данными БЕЗ принудительной анимации.
+        Обновляет графики трендов с последними данными.
 
         Args:
             trend_data: Готовые данные для графиков (если None, будут загружены)
+            allow_animation (bool): Разрешить анимацию (графики сами решат, нужна ли она)
         """
         try:
             # Если данные не переданы, получаем их
@@ -573,21 +574,24 @@ class StatsWidget(QWidget):
                 self.silver_chart_widget.clear()
                 return
 
-            # ИЗМЕНЕНО: Обновляем графики БЕЗ принудительной очистки кэша и анимации
+            # ИСПРАВЛЕНО: Обновляем графики с учетом флага allow_animation
+            # Если allow_animation=False, принудительно отключаем анимацию
+            # Если allow_animation=True, позволяем графикам самим решить
+            force_no_animation = not allow_animation
+
             try:
                 self._py_logger.debug(f"Обновление графика боев: {len(trend_data['dates'])} точек данных")
-                # force_no_animation=True для автообновлений
-                self.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
+                self.battles_chart_widget.update_chart(trend_data, force_no_animation=force_no_animation)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика боев: {e}")
 
             try:
-                self.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
+                self.keys_chart_widget.update_chart(trend_data, force_no_animation=force_no_animation)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика ключей: {e}")
 
             try:
-                self.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
+                self.silver_chart_widget.update_chart(trend_data, force_no_animation=force_no_animation)
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении графика серебра: {e}")
 

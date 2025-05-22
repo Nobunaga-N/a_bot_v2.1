@@ -22,7 +22,7 @@ class ResponsiveChartWidget(QWidget):
         # Настройка лейаута
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)  # Убираем лишние отступы
+        self.layout.setSpacing(0)
 
         # Заголовок графика
         header_layout = QVBoxLayout()
@@ -55,7 +55,7 @@ class ResponsiveChartWidget(QWidget):
         chart_layout = QVBoxLayout(self.chart_container)
         chart_layout.setContentsMargins(1, 1, 1, 1)
 
-        # Создание и настройка WebEngineView с улучшенными параметрами
+        # Создание и настройка WebEngineView
         self.web_view = QWebEngineView()
 
         # Настраиваем параметры браузера
@@ -70,11 +70,17 @@ class ResponsiveChartWidget(QWidget):
         chart_layout.addWidget(self.web_view)
         self.layout.addWidget(self.chart_container)
 
-        # Легенда для графика (будет переопределена в дочерних классах)
+        # Легенда для графика
         self.legend_layout = QHBoxLayout()
         self.legend_layout.setContentsMargins(15, 5, 15, 10)
         self.legend_layout.addStretch()
         self.layout.addLayout(self.legend_layout)
+
+        # ИСПРАВЛЕННАЯ ЛОГИКА УПРАВЛЕНИЯ АНИМАЦИЕЙ
+        # Флаги для управления анимацией
+        self.should_animate_next = False  # Флаг для следующего обновления
+        self.is_tab_visible = False  # Видимость вкладки
+        self.has_animated_since_show = False  # Анимировали ли уже после показа
 
         # Временный HTML-файл для графика
         self.html_path = None
@@ -84,19 +90,11 @@ class ResponsiveChartWidget(QWidget):
         self.resize_timer.setSingleShot(True)
         self.resize_timer.timeout.connect(self.handle_resize)
 
+        # Переменная для хранения последних данных
+        self.last_data = None
+
         # Создать базовый HTML шаблон
         self.create_html_template()
-
-        # ИЗМЕНЕННАЯ ЛОГИКА УПРАВЛЕНИЯ АНИМАЦИЕЙ
-        # Флаг для контроля анимации при первом показе вкладки
-        self.allow_animation_on_tab_show = True
-        # Флаг для отслеживания первого обновления после показа вкладки
-        self.first_update_after_show = True
-        # Флаг видимости виджета
-        self.is_visible = False
-
-        # Переменная для хранения последних данных (для перерисовки при изменении размера)
-        self.last_data = None
 
     def create_html_template(self):
         """Создает HTML-шаблон с графиком."""
@@ -106,44 +104,41 @@ class ResponsiveChartWidget(QWidget):
     def resizeEvent(self, event):
         """Обработчик изменения размера виджета."""
         super().resizeEvent(event)
-        # Запуск таймера при изменении размера - предотвращает многократную перерисовку
-        self.resize_timer.start(50)  # 50мс задержка
+        self.resize_timer.start(50)
 
     def handle_resize(self):
-        """Обработка изменения размера с небольшой задержкой для оптимизации."""
-        # Проверяем, была ли уже инициирована перерисовка
+        """Обработка изменения размера с задержкой для оптимизации."""
         if hasattr(self, '_is_currently_updating') and self._is_currently_updating:
             return
 
-        # Если есть данные, перерисовываем график БЕЗ анимации при изменении размера
         if hasattr(self, 'last_data') and self.last_data:
-            # Устанавливаем флаг, что перерисовка в процессе
             self._is_currently_updating = True
-
             try:
-                # Обновляем график БЕЗ анимации при изменении размера
+                # При изменении размера ВСЕГДА без анимации
                 self.update_chart(self.last_data, force_no_animation=True)
             finally:
-                # Сбрасываем флаг после окончания операции
                 self._is_currently_updating = False
 
     def showEvent(self, event):
         """Обработчик события показа виджета."""
         super().showEvent(event)
-        self.is_visible = True
 
-        # При показе виджета разрешаем анимацию для следующего обновления
-        if self.allow_animation_on_tab_show:
-            self.first_update_after_show = True
-            self._py_logger.debug(f"График {self.title}: разрешена анимация при показе вкладки")
+        self.is_tab_visible = True
+
+        # ИСПРАВЛЕНО: При показе вкладки разрешаем анимацию для СЛЕДУЮЩЕГО обновления
+        if not self.has_animated_since_show:
+            self.should_animate_next = True
+            self._py_logger.debug(f"График {self.title}: разрешена анимация для следующего обновления")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""
         super().hideEvent(event)
-        self.is_visible = False
 
-        # При скрытии вкладки восстанавливаем возможность анимации для следующего показа
-        self.allow_animation_on_tab_show = True
+        self.is_tab_visible = False
+
+        # При скрытии сбрасываем флаг анимации, чтобы при следующем показе снова анимировать
+        self.has_animated_since_show = False
+        self._py_logger.debug(f"График {self.title}: сброшен флаг анимации при скрытии")
 
     def should_animate(self, force_no_animation=False):
         """
@@ -158,10 +153,13 @@ class ResponsiveChartWidget(QWidget):
         if force_no_animation:
             return False
 
-        # Анимация только при первом обновлении после показа вкладки
-        if self.first_update_after_show and self.is_visible:
-            self.first_update_after_show = False  # Отключаем для последующих обновлений
-            self._py_logger.debug(f"График {self.title}: включена анимация (первое обновление после показа)")
+        # ИСПРАВЛЕНО: Анимация только если разрешена и вкладка видима
+        if self.should_animate_next and self.is_tab_visible:
+            # Отключаем анимацию для последующих обновлений
+            self.should_animate_next = False
+            self.has_animated_since_show = True
+
+            self._py_logger.debug(f"График {self.title}: включена анимация")
             return True
 
         return False
@@ -174,7 +172,6 @@ class ResponsiveChartWidget(QWidget):
             data: Данные для графика
             force_no_animation (bool): Принудительно отключить анимацию
         """
-        # Пропускаем обновление, если данные не изменились или их нет
         if not data:
             return
 
@@ -186,20 +183,6 @@ class ResponsiveChartWidget(QWidget):
 
         self._py_logger.debug(
             f"График {self.title}: обновление {animation_status}, точек данных: {len(data.get('dates', []))}")
-
-    def force_reload(self):
-        """Принудительно перезагружает график с последними данными БЕЗ анимации."""
-        if not self.last_data:
-            self._py_logger.debug("Нет данных для принудительной перезагрузки графика")
-            return
-
-        # Очищаем кэш
-        self.clear_cache(preserve_animation_state=True)
-
-        # Обновляем с последними сохраненными данными БЕЗ анимации
-        self.update_chart(self.last_data, force_no_animation=True)
-
-        self._py_logger.debug("Принудительная перезагрузка графика выполнена")
 
     def clear(self):
         """Очищает график."""
@@ -248,12 +231,12 @@ class ResponsiveChartWidget(QWidget):
 
 
 class BattlesChartWidget(ResponsiveChartWidget):
-    """Виджет для отображения графика побед и поражений (без линии процента побед)."""
+    """Виджет для отображения графика побед и поражений."""
 
     def __init__(self, parent=None):
         super().__init__("Тренд побед и поражений (7 дней)", parent)
 
-        # Настройка легенды (только для столбцов, без линии процента побед)
+        # Настройка легенды
         victory_legend = QLabel("● Победы")
         victory_legend.setStyleSheet(f"color: {Styles.COLORS['secondary']}; font-size: 12px;")
         self.legend_layout.addWidget(victory_legend)
@@ -390,7 +373,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
                 }
 
                 function getOptimalFontSize() {
-                    // Адаптивный размер шрифта в зависимости от ширины канваса
                     const canvas = chartState.canvas;
                     if (!canvas) return 10;
 
@@ -401,13 +383,12 @@ class BattlesChartWidget(ResponsiveChartWidget):
                 }
 
                 function calculateOptimalPadding() {
-                    // Рассчитываем оптимальные отступы в зависимости от размера канваса
                     const canvas = chartState.canvas;
                     const width = canvas.clientWidth;
                     const height = canvas.clientHeight;
 
                     let leftPadding = Math.max(35, width * 0.06);
-                    let rightPadding = Math.max(20, width * 0.03); // Уменьшаем правый отступ, т.к. нет второй оси Y
+                    let rightPadding = Math.max(20, width * 0.03);
                     let topPadding = Math.max(15, height * 0.06);
                     let bottomPadding = Math.max(25, height * 0.1);
 
@@ -491,7 +472,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
                     const baselineX = padding.left;
                     const fontSize = getOptimalFontSize();
 
-                    // Фон области графика (полупрозрачный)
+                    // Фон области графика
                     ctx.fillStyle = 'rgba(20, 26, 47, 0.5)';
                     ctx.fillRect(padding.left, padding.top, graphWidth, graphHeight);
 
@@ -504,7 +485,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
                     const battleStep = calculateAxisStep(maxBattles);
                     const numBattleLines = Math.floor(maxBattles / battleStep) + 1;
 
-                    // Горизонтальные линии сетки (шкала боев)
+                    // Горизонтальные линии сетки
                     for (let i = 0; i < numBattleLines; i++) {
                         const value = i * battleStep;
                         const y = baselineY - (value / maxBattles) * graphHeight;
@@ -512,7 +493,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
                         ctx.moveTo(baselineX, y);
                         ctx.lineTo(baselineX + graphWidth, y);
 
-                        // Подпись значения оси Y (бои)
+                        // Подпись значения оси Y
                         if (canvasWidth > 300) {
                             ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
                             ctx.font = `${fontSize}px Arial`;
@@ -527,18 +508,15 @@ class BattlesChartWidget(ResponsiveChartWidget):
                     const availableWidth = graphWidth / dataLength;
                     let skipFactor = 1;
 
-                    // Определяем, нужно ли пропускать даты
                     if (availableWidth < 50) skipFactor = 2;
                     if (availableWidth < 30) skipFactor = 3;
 
                     for (let i = 0; i < dataLength; i++) {
                         const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
 
-                        // Рисуем вертикальную линию сетки
                         ctx.moveTo(x, padding.top);
                         ctx.lineTo(x, baselineY);
 
-                        // Подпись даты (пропускаем некоторые для экономии места)
                         if (i % skipFactor === 0 || i === dataLength - 1) {
                             ctx.fillStyle = 'rgba(155, 160, 188, 0.9)';
                             ctx.font = `${fontSize}px Arial`;
@@ -563,7 +541,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
                     const baselineY = canvasHeight - padding.bottom;
                     const dataLength = chartData.dates.length;
 
-                    // Вычисляем оптимальную ширину столбцов
                     const maxBarWidth = 40;
                     let barWidth = Math.min((graphWidth / dataLength) * 0.7, maxBarWidth);
                     const barGap = Math.max(1, Math.min(2, barWidth * 0.1));
@@ -583,8 +560,8 @@ class BattlesChartWidget(ResponsiveChartWidget):
 
                         // Создаем градиент для побед
                         const victoryGradient = ctx.createLinearGradient(0, baselineY - victoryHeight, 0, baselineY);
-                        victoryGradient.addColorStop(0, 'rgba(66, 225, 137, 1)');    // Ярче вверху
-                        victoryGradient.addColorStop(1, 'rgba(66, 225, 137, 0.7)');  // Более прозрачный внизу
+                        victoryGradient.addColorStop(0, 'rgba(66, 225, 137, 1)');
+                        victoryGradient.addColorStop(1, 'rgba(66, 225, 137, 0.7)');
 
                         // Рисуем столбец побед
                         ctx.fillStyle = victoryGradient;
@@ -599,10 +576,8 @@ class BattlesChartWidget(ResponsiveChartWidget):
                             index: i
                         };
 
-                        // Скругленные углы для верхней части
                         const radius = Math.min(3, singleBarWidth / 4);
 
-                        // Рисуем столбец со скругленными углами вверху
                         ctx.beginPath();
                         ctx.moveTo(victoryRect.x + radius, victoryRect.y);
                         ctx.lineTo(victoryRect.x + victoryRect.width - radius, victoryRect.y);
@@ -618,8 +593,8 @@ class BattlesChartWidget(ResponsiveChartWidget):
 
                         // Создаем градиент для поражений
                         const defeatGradient = ctx.createLinearGradient(0, baselineY - defeatHeight, 0, baselineY);
-                        defeatGradient.addColorStop(0, 'rgba(255, 107, 108, 1)');   // Ярче вверху
-                        defeatGradient.addColorStop(1, 'rgba(255, 107, 108, 0.7)'); // Более прозрачный внизу
+                        defeatGradient.addColorStop(0, 'rgba(255, 107, 108, 1)');
+                        defeatGradient.addColorStop(1, 'rgba(255, 107, 108, 0.7)');
 
                         // Рисуем столбец поражений
                         ctx.fillStyle = defeatGradient;
@@ -634,7 +609,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
                             index: i
                         };
 
-                        // Рисуем столбец со скругленными углами вверху
                         ctx.beginPath();
                         ctx.moveTo(defeatRect.x + radius, defeatRect.y);
                         ctx.lineTo(defeatRect.x + defeatRect.width - radius, defeatRect.y);
@@ -658,7 +632,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
 
                     chartState.mouse = { x, y };
 
-                    // Проверяем наведение на столбцы
                     let hoveredBar = null;
                     for (const bar of chartState.bars) {
                         if (
@@ -672,16 +645,13 @@ class BattlesChartWidget(ResponsiveChartWidget):
                         }
                     }
 
-                    // Обновляем подсказку
                     if (hoveredBar) {
                         const tooltip = chartState.tooltip;
                         tooltip.style.display = 'block';
 
-                        // Позиционируем подсказку, чтобы она не выходила за границы экрана
                         let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
                         let tooltipY = Math.max(y - 10, 10);
 
-                        // Если подсказка слишком низко, показываем ее выше
                         if (y > canvas.clientHeight - 80) {
                             tooltipY = y - 70;
                         }
@@ -692,7 +662,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
                         const typeText = hoveredBar.type === 'victory' ? 'Победы' : 'Поражения';
                         const valueText = formatNumber(hoveredBar.value);
 
-                        // Улучшенное форматирование подсказки
                         tooltip.innerHTML = `
                             <strong>${hoveredBar.date}</strong>
                             ${typeText}: ${valueText}
@@ -701,19 +670,16 @@ class BattlesChartWidget(ResponsiveChartWidget):
                         chartState.tooltip.style.display = 'none';
                     }
 
-                    // Обновляем состояние графика
                     chartState.hoveredBar = hoveredBar;
                 }
 
                 function calculateAxisStep(maxValue) {
-                    // Помогает определить удобный шаг для оси
                     if (maxValue <= 5) return 1;
                     if (maxValue <= 20) return 5;
                     if (maxValue <= 50) return 10;
                     if (maxValue <= 100) return 20;
                     if (maxValue <= 500) return 100;
 
-                    // Для больших значений
                     const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
                     return Math.ceil(maxValue / 5 / magnitude) * magnitude;
                 }
@@ -728,26 +694,20 @@ class BattlesChartWidget(ResponsiveChartWidget):
                     const elapsed = timestamp - chartState.animation.startTime;
                     const duration = ANIMATION_DURATION;
 
-                    // Рассчитываем прогресс анимации (от 0 до 1) с эффектом ease-out
                     let progress = elapsed / duration;
                     progress = Math.min(1, progress);
 
-                    // Применяем кривую плавности (ease-out)
                     const animationProgress = 1 - Math.pow(1 - progress, 3);
 
-                    // Обновляем график с текущим прогрессом анимации
                     drawChart(animationProgress);
 
                     if (progress < 1) {
-                        // Если анимация не завершена, запрашиваем следующий кадр
                         requestAnimationFrame(animateChart);
                     } else {
-                        // Анимация завершена
                         chartState.animation.isAnimating = false;
                     }
                 }
 
-                // Обработчики событий
                 function setupEventListeners() {
                     const canvas = document.getElementById('battles-chart');
 
@@ -757,23 +717,18 @@ class BattlesChartWidget(ResponsiveChartWidget):
                         chartState.tooltip.style.display = 'none';
                     });
 
-                    // Обработка изменения размера
                     window.addEventListener('resize', function() {
-                        // При изменении размера перерисовываем без анимации
                         drawChart(1);
                     });
                 }
 
-                // Инициализация с анимацией
                 window.onload = function() {
                     setupEventListeners();
 
-                    // Проверяем, нужно ли включать анимацию
                     if (ENABLE_ANIMATIONS) {
                         chartState.animation.isAnimating = true;
                         requestAnimationFrame(animateChart);
                     } else {
-                        // Рисуем график сразу полностью без анимации
                         drawChart(1);
                     }
                 };
@@ -783,7 +738,6 @@ class BattlesChartWidget(ResponsiveChartWidget):
         """
 
         try:
-            # Создаем временный файл
             fd, self.html_path = tempfile.mkstemp(suffix=".html", prefix="aom_battles_chart_")
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 f.write(html_content)
@@ -808,7 +762,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
 
             # Проверка данных
             if not trend_data.get("dates") or len(trend_data.get("dates", [])) == 0:
-                self._py_logger.warning("Пустой набор данных для графика побед")
+                self._py_logger.warning("Пустой набор данных for график побед")
                 trend_data = {
                     "dates": [],
                     "victories": [],
@@ -819,7 +773,7 @@ class BattlesChartWidget(ResponsiveChartWidget):
             import json
             json_data = json.dumps(trend_data)
 
-            # Определяем, нужна ли анимация на основе новой логики
+            # ИСПРАВЛЕНО: Используем исправленную логику анимации
             enable_animation = self.should_animate(force_no_animation)
 
             # Замена плейсхолдеров данными

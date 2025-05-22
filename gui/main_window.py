@@ -209,9 +209,29 @@ class MainWindow(QMainWindow):
                     for p, button in buttons.items():
                         button.setChecked(p == page_id)
 
-            # Обновляем статистику при переходе на страницу статистики
+            # ИСПРАВЛЕНО: Обновляем статистику и настраиваем анимацию при переходе на страницу статистики
             if page_id == "stats":
+                # ИСПРАВЛЕНО: Устанавливаем флаги анимации для графиков перед обновлением
+                if hasattr(self, 'stats_widget'):
+                    # Разрешаем анимацию для всех графиков при следующем обновлении
+                    if hasattr(self.stats_widget, 'battles_chart_widget'):
+                        self.stats_widget.battles_chart_widget.should_animate_next = True
+                        self.stats_widget.battles_chart_widget.has_animated_since_show = False
+                        self._py_logger.debug("Установлен флаг анимации для графика побед")
+
+                    if hasattr(self.stats_widget, 'keys_chart_widget'):
+                        self.stats_widget.keys_chart_widget.should_animate_next = True
+                        self.stats_widget.keys_chart_widget.has_animated_since_show = False
+                        self._py_logger.debug("Установлен флаг анимации для графика ключей")
+
+                    if hasattr(self.stats_widget, 'silver_chart_widget'):
+                        self.stats_widget.silver_chart_widget.should_animate_next = True
+                        self.stats_widget.silver_chart_widget.has_animated_since_show = False
+                        self._py_logger.debug("Установлен флаг анимации для графика серебра")
+
+                # Обновляем статистику с анимацией
                 self.refresh_statistics()
+
                 # Более частое обновление на странице статистики
                 if hasattr(self, 'stats_update_timer'):
                     self.stats_update_timer.stop()
@@ -301,42 +321,40 @@ class MainWindow(QMainWindow):
                     current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
                 self._last_charts_update = current_time
 
-                # ИЗМЕНЕНО: Убираем принудительную очистку кэша графиков
-                # Принудительно обновляем статистику если бот работает
+                # ИСПРАВЛЕНО: Корректная логика автообновления графиков
                 if self.bot_engine.running.is_set():
-                    # Обновляем без визуальных эффектов и сообщений
-                    self.stats_widget.refresh_statistics(show_message=False, loading_animation=False)
-                    self._py_logger.debug("Автоматическое обновление статистики через StatsWidget")
+                    # Получаем данные для обновления
+                    current_session_stats = None
+                    if not getattr(self.bot_engine, 'session_stats_registered', False):
+                        current_session_stats = self.bot_engine.stats
+                        self._py_logger.debug("Автообновление: используем статистику текущей сессии")
+                    else:
+                        self._py_logger.debug("Автообновление: сессия уже зарегистрирована")
 
-                    # ИЗМЕНЕНО: Принудительно обновляем графики без очистки кэша и анимации
+                    # ИСПРАВЛЕНО: Получаем актуальные данные для графиков
                     try:
-                        if hasattr(self.bot_engine, 'stats_manager'):
-                            # Получаем данные для графиков
-                            current_session_stats = None
-                            if not getattr(self.bot_engine, 'session_stats_registered', False):
-                                current_session_stats = self.bot_engine.stats
-                            trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
-                                current_session_stats)
+                        # Получаем данные трендов с учетом текущей сессии
+                        trend_data = self.bot_engine.stats_manager.get_trend_data_with_current_session(
+                            current_session_stats
+                        )
 
-                            # Принудительно обновляем каждый график БЕЗ анимации
-                            self.stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
-                            self.stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
-                            self.stats_widget.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
+                        # ИСПРАВЛЕНО: Обновляем каждый график с актуальными данными БЕЗ анимации
+                        self.stats_widget.battles_chart_widget.update_chart(trend_data, force_no_animation=True)
+                        self.stats_widget.keys_chart_widget.update_chart(trend_data, force_no_animation=True)
+                        self.stats_widget.silver_chart_widget.update_chart(trend_data, force_no_animation=True)
 
-                            self._py_logger.debug("Принудительное обновление графиков выполнено БЕЗ анимации")
+                        self._py_logger.debug("Автообновление графиков выполнено с актуальными данными")
+
+                        # Также обновляем карточки и таблицы
+                        self.stats_widget.update_stats_cards()
+                        self.stats_widget.update_daily_stats_table()
+
                     except Exception as e:
-                        self._py_logger.error(f"Ошибка при принудительном обновлении графиков: {e}")
+                        self._py_logger.error(f"Ошибка при автообновлении графиков: {e}")
 
                     return
 
-                # Принудительно обновляем графики только с указанным интервалом БЕЗ анимации
-                try:
-                    self.stats_widget.update_trend_charts()
-                    self._py_logger.debug("Обновление графиков через update_trend_charts")
-                except Exception as e:
-                    self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
-
-            # Если бот запущен, проверяем изменение статистики
+            # Если бот запущен, проверяем изменение статистики для других компонентов
             if self.bot_engine.running.is_set():
                 # Проверяем, была ли сессия уже зарегистрирована
                 is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
@@ -348,9 +366,13 @@ class MainWindow(QMainWindow):
 
                     if str(current_hash) != self.last_stats_hash:
                         self.last_stats_hash = str(current_hash)
-                        # Обновляем только табличные данные, но не перерисовываем графики
-                        self.stats_widget.update_stats_cards()
-                        self.stats_widget.update_daily_stats_table()
+                        # Обновляем только табличные данные, графики уже обновлены выше
+                        if not hasattr(self, '_last_charts_update') or (
+                                current_time - getattr(self, '_last_charts_update', 0)) > update_interval:
+                            # Если прошло достаточно времени, обновляем и карточки
+                            self.stats_widget.update_stats_cards()
+                            self.stats_widget.update_daily_stats_table()
+
                         self._py_logger.debug("Автоматическое обновление статистики выполнено (бот запущен)")
                 else:
                     self._py_logger.debug("Статистика сессии уже зарегистрирована, не обновляем текущие данные")
