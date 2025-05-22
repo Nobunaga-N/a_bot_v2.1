@@ -220,7 +220,7 @@ class StatsWidget(QWidget):
         self.data_provider = StatsDataProvider(self.bot_engine, self.period_combo, self._py_logger)
         self.updater = ComponentUpdater(self, self.data_provider, self._py_logger)
 
-        # Подключаем таймер автоматического обновления
+        # Подключаем таймер автоматического обновления (всегда включен)
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.auto_refresh_statistics)
         self.update_timer.start(3000)
@@ -271,7 +271,7 @@ class StatsWidget(QWidget):
         """)
         title_layout.addWidget(title_label)
 
-        subtitle_label = QLabel("Детальная статистика работы бота")
+        subtitle_label = QLabel("Детальная статистика работы бота (обновляется автоматически)")
         subtitle_label.setObjectName("subtitle")
         subtitle_label.setStyleSheet(f"""
             font-size: 14px;
@@ -304,9 +304,6 @@ class StatsWidget(QWidget):
         overview_layout.setContentsMargins(0, 10, 0, 0)
         overview_layout.setSpacing(20)
 
-        # Кнопки управления
-        self._create_control_buttons(overview_layout)
-
         # Область прокрутки
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -326,28 +323,6 @@ class StatsWidget(QWidget):
         scroll_layout.addStretch(1)
         scroll_area.setWidget(scroll_content)
         overview_layout.addWidget(scroll_area)
-
-    def _create_control_buttons(self, layout):
-        """Создает кнопки управления."""
-        refresh_button_layout = QHBoxLayout()
-        refresh_button_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
-
-        self.auto_refresh_checkbox = QCheckBox("Автоматическое обновление")
-        self.auto_refresh_checkbox.setChecked(True)
-        self.auto_refresh_checkbox.stateChanged.connect(self.toggle_auto_refresh)
-        refresh_button_layout.addWidget(self.auto_refresh_checkbox)
-
-        refresh_button_layout.addStretch()
-
-        self.refresh_stats_button = QPushButton("🔄 Обновить статистику")
-        self.refresh_stats_button.setObjectName("primary")
-        self.refresh_stats_button.setFixedWidth(200)
-        self.refresh_stats_button.setMinimumHeight(30)
-        self.refresh_stats_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.refresh_stats_button.clicked.connect(self.refresh_statistics)
-        refresh_button_layout.addWidget(self.refresh_stats_button)
-
-        layout.addLayout(refresh_button_layout)
 
     def _create_stats_cards(self, layout):
         """Создает карточки со статистикой."""
@@ -412,23 +387,10 @@ class StatsWidget(QWidget):
         daily_stats_layout.setContentsMargins(0, 10, 0, 0)
         daily_stats_layout.setSpacing(15)
 
-        # Заголовок и кнопка
-        top_layout = QHBoxLayout()
-
+        # Заголовок
         description_label = QLabel("Показатели за последние 7 дней с детализацией по дням")
         description_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']};")
-        top_layout.addWidget(description_label)
-        top_layout.addStretch(1)
-
-        self.refresh_daily_stats_button = QPushButton("🔄 Обновить статистику")
-        self.refresh_daily_stats_button.setObjectName("primary")
-        self.refresh_daily_stats_button.setFixedWidth(200)
-        self.refresh_daily_stats_button.setMinimumHeight(30)
-        self.refresh_daily_stats_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.refresh_daily_stats_button.clicked.connect(self.refresh_statistics)
-        top_layout.addWidget(self.refresh_daily_stats_button)
-
-        daily_stats_layout.addLayout(top_layout)
+        daily_stats_layout.addWidget(description_label)
 
         # Таблица
         daily_stats_frame = QFrame()
@@ -451,29 +413,6 @@ class StatsWidget(QWidget):
 
         daily_stats_layout_frame.addWidget(self.daily_stats_table, 1)
         daily_stats_layout.addWidget(daily_stats_frame, 1)
-
-        # Индикатор автообновления
-        self.auto_refresh_indicator = QLabel("Статистика обновляется автоматически")
-        self.auto_refresh_indicator.setStyleSheet(f"""
-            color: {Styles.COLORS['secondary']};
-            font-style: italic;
-            padding: 5px;
-        """)
-        self.auto_refresh_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        daily_stats_layout.addWidget(self.auto_refresh_indicator)
-
-    def toggle_auto_refresh(self, state):
-        """Включает/выключает автоматическое обновление статистики."""
-        if state:
-            self.update_timer.start(3000)
-            self.auto_refresh_indicator.setText("Статистика обновляется автоматически без анимации графиков")
-            self.auto_refresh_indicator.setStyleSheet(
-                f"color: {Styles.COLORS['secondary']}; font-style: italic; padding: 5px;")
-        else:
-            self.update_timer.stop()
-            self.auto_refresh_indicator.setText("Автообновление отключено. Используйте кнопку обновления для анимации")
-            self.auto_refresh_indicator.setStyleSheet(
-                f"color: {Styles.COLORS['accent']}; font-style: italic; padding: 5px;")
 
     def auto_refresh_statistics(self):
         """Автоматически обновляет статистику с текущей сессией."""
@@ -516,15 +455,11 @@ class StatsWidget(QWidget):
         self.refresh_statistics(show_message=True)
 
     @handle_stats_errors()
-    def refresh_statistics(self, show_message=True, loading_animation=True, allow_animation=None):
+    def refresh_statistics(self, show_message=False, loading_animation=False, allow_animation=None):
         """Обновляет все отображения статистики."""
         if not self.data_provider.stats_manager:
             self._py_logger.warning("StatsManager недоступен")
             return
-
-        if loading_animation:
-            # Управление состоянием кнопок
-            self._set_loading_state(True)
 
         try:
             if show_message:
@@ -542,54 +477,24 @@ class StatsWidget(QWidget):
 
             if show_message:
                 self._py_logger.debug("Обновление статистики завершено успешно")
-                self._show_update_success_message()
 
             self.request_refresh.emit()
 
-        finally:
-            if loading_animation:
-                self._set_loading_state(False)
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при обновлении статистики: {e}")
 
-    def _set_loading_state(self, loading):
-        """Управляет состоянием кнопок во время загрузки."""
-        buttons = [self.refresh_stats_button]
-        if hasattr(self, 'refresh_daily_stats_button'):
-            buttons.append(self.refresh_daily_stats_button)
-
-        for button in buttons:
-            if loading:
-                button.setEnabled(False)
-                if not hasattr(button, '_original_text'):
-                    button._original_text = button.text()
-                button.setText("⏳ Обновление...")
-            else:
-                button.setEnabled(True)
-                if hasattr(button, '_original_text'):
-                    button.setText(button._original_text)
-
-        if loading:
-            QApplication.processEvents()
+    # Убранные методы для совместимости (оставляем пустыми)
+    def toggle_auto_refresh(self, state):
+        """Метод для совместимости - автообновление всегда включено."""
+        pass
 
     def _show_update_success_message(self):
-        """Показывает сообщение об успешном обновлении."""
-        try:
-            success_label = QLabel("✓ Данные успешно обновлены", self)
-            success_label.setStyleSheet(f"""
-                background-color: {Styles.COLORS['secondary']};
-                color: {Styles.COLORS['background_dark']};
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            """)
-            success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            success_label.adjustSize()
-            success_label.move(self.width() - success_label.width() - 20, 20)
-            success_label.show()
+        """Метод для совместимости - больше не показываем сообщения."""
+        pass
 
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(3000, success_label.deleteLater)
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при показе сообщения: {e}")
+    def _set_loading_state(self, loading):
+        """Метод для совместимости - больше нет кнопок для управления."""
+        pass
 
     # Методы совместимости для внешнего API
     def update_stats_cards(self):
