@@ -12,6 +12,192 @@ from gui.widgets.keys_progress_bar import KeysProgressBar
 from gui.components.fancy_button import FancyButton, FancyButtonGroup
 
 
+class MetricsCalculator:
+    """Калькулятор для расчета показателей производительности."""
+
+    def __init__(self, logger):
+        self._py_logger = logger
+
+    def calculate_performance_metrics(self, stats, start_time=None):
+        """Рассчитывает все показатели производительности."""
+        battles = stats.get("battles_started", 0)
+        victories = stats.get("victories", 0)
+        defeats = stats.get("defeats", 0)
+        keys_collected = stats.get("keys_collected", 0)
+        silver_collected = stats.get("silver_collected", 0)
+
+        # Базовые показатели
+        total_battles = victories + defeats
+        success_rate = (victories / total_battles * 100) if total_battles > 0 else 0
+        keys_per_victory = (keys_collected / victories) if victories > 0 else 0
+        silver_per_victory = (silver_collected / victories) if victories > 0 else 0
+
+        # Временные показатели
+        keys_per_hour = 0
+        silver_per_hour = 0
+
+        if start_time:
+            elapsed_hours = (time.time() - start_time) / 3600
+            if elapsed_hours > 0:
+                keys_per_hour = keys_collected / elapsed_hours
+                silver_per_hour = silver_collected / elapsed_hours
+
+        return {
+            'battles': battles,
+            'victories': victories,
+            'defeats': defeats,
+            'total_battles': total_battles,
+            'success_rate': success_rate,
+            'keys_collected': keys_collected,
+            'keys_per_victory': keys_per_victory,
+            'keys_per_hour': keys_per_hour,
+            'silver_collected': silver_collected,
+            'silver_per_victory': silver_per_victory,
+            'silver_per_hour': silver_per_hour,
+            'connection_losses': stats.get("connection_losses", 0)
+        }
+
+    def format_runtime(self, start_time):
+        """Форматирует время работы."""
+        if not start_time:
+            return "00:00:00"
+
+        try:
+            elapsed = int(time.time() - start_time)
+            hours = elapsed // 3600
+            minutes = (elapsed % 3600) // 60
+            seconds = elapsed % 60
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при форматировании времени: {e}")
+            return "00:00:00"
+
+
+class LicenseManager:
+    """Менеджер для работы с лицензией."""
+
+    def __init__(self, license_validator, logger):
+        self.license_validator = license_validator
+        self._py_logger = logger
+
+    def check_license_for_start(self, parent_widget):
+        """Проверяет лицензию перед запуском бота."""
+        if not self.license_validator:
+            self._py_logger.warning("Валидатор лицензии не доступен!")
+            return True
+
+        try:
+            self._py_logger.info("Проверка лицензии перед запуском бота...")
+            if not self.license_validator.is_license_valid():
+                self._py_logger.warning("Лицензия недействительна, запуск бота невозможен")
+                return self._show_license_dialog(parent_widget)
+            else:
+                self._py_logger.info("Лицензия действительна, запуск бота разрешен")
+                return True
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при проверке лицензии: {e}")
+            return True  # В случае ошибки разрешаем запуск
+
+    def _show_license_dialog(self, parent_widget):
+        """Показывает диалог активации лицензии."""
+        from PyQt6.QtWidgets import QMessageBox
+        result = QMessageBox.warning(
+            parent_widget,
+            "Требуется активация лицензии",
+            "Для запуска бота необходимо активировать лицензию. "
+            "Перейти на страницу активации лицензии?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+
+        if result == QMessageBox.StandardButton.Yes:
+            self._navigate_to_license_page(parent_widget)
+
+        return False
+
+    def _navigate_to_license_page(self, parent_widget):
+        """Переходит на страницу лицензии."""
+        from gui.main_window import MainWindow
+        parent = parent_widget.parent()
+        while parent:
+            if isinstance(parent, MainWindow):
+                parent.change_page("license")
+                break
+            parent = parent.parent()
+
+    def get_license_status(self):
+        """Возвращает статус лицензии."""
+        if not self.license_validator:
+            return True
+        return self.license_validator.is_license_valid()
+
+
+class UIBuilder:
+    """Строитель UI компонентов."""
+
+    @staticmethod
+    def create_stats_cards():
+        """Создает карточки статистики."""
+        card_configs = [
+            ("silver_card", "Серебро собрано", "0K", Styles.COLORS["primary"], "silver"),
+            ("victories_card", "Победы", "0", Styles.COLORS["secondary"], "victory"),
+            ("defeats_card", "Поражения", "0", Styles.COLORS["accent"], "defeat"),
+            ("keys_card", "Ключей собрано", "0", Styles.COLORS["warning"], "key")
+        ]
+
+        cards = {}
+        layout = QHBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        for attr_name, title, value, color, icon in card_configs:
+            card = StatCard(title, value, color, icon)
+            cards[attr_name] = card
+            layout.addWidget(card)
+
+        # Устанавливаем фиксированную высоту для контейнера карточек
+        stats_container = QWidget()
+        stats_container.setLayout(layout)
+        stats_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        stats_container.setContentsMargins(0, 0, 0, 0)
+
+        return cards, stats_container
+
+    @staticmethod
+    def create_metrics_grid():
+        """Создает сетку показателей производительности."""
+        metrics_config = [
+            ("runtime_label", "Время работы:", "00:00:00", Styles.COLORS['primary']),
+            ("battles_label", "Боёв начато:", "0", Styles.COLORS['primary']),
+            ("keys_per_victory_label", "Ключей за победу:", "0", Styles.COLORS['warning']),
+            ("silver_per_victory_label", "Серебра за победу:", "0K", Styles.COLORS['primary']),
+            ("success_rate_label", "Успешность:", "0%", Styles.COLORS['secondary']),
+            ("connection_losses_label", "Потери соединения:", "0", Styles.COLORS['accent']),
+            ("keys_per_hour_label", "Ключей в час:", "0", Styles.COLORS['warning']),
+            ("silver_per_hour_label", "Серебра в час:", "0K", Styles.COLORS['primary'])
+        ]
+
+        metrics_content = QWidget()
+        metrics_content_layout = QGridLayout(metrics_content)
+        metrics_content_layout.setContentsMargins(15, 15, 15, 15)
+
+        labels = {}
+        for i, (attr_name, label_text, default_value, color) in enumerate(metrics_config):
+            # Создаем метку
+            metrics_content_layout.addWidget(QLabel(label_text), i, 0)
+
+            # Создаем значение
+            value_label = QLabel(default_value)
+            value_label.setStyleSheet(f"color: {color};")
+            labels[attr_name] = value_label
+            metrics_content_layout.addWidget(value_label, i, 1)
+
+        # Растягиваем сетку показателей вниз
+        metrics_content_layout.setRowStretch(len(metrics_config), 1)
+
+        return labels, metrics_content
+
+
 class HomeWidget(QWidget):
     """Главная страница с управлением ботом и основной статистикой."""
 
@@ -22,11 +208,14 @@ class HomeWidget(QWidget):
         super().__init__(parent)
         self.bot_engine = bot_engine
         self.signals = signals
-        self.license_validator = license_validator  # Добавляем валидатор лицензии
 
         # Добавляем логгер
         import logging
         self._py_logger = logging.getLogger("BotLogger")
+
+        # Инициализируем менеджеры
+        self.metrics_calculator = MetricsCalculator(self._py_logger)
+        self.license_manager = LicenseManager(license_validator, self._py_logger)
 
         # Время начала работы бота
         self.start_time = None
@@ -34,10 +223,17 @@ class HomeWidget(QWidget):
         # Цель по количеству ключей (можно изменить через настройки)
         self.target_keys = self.DEFAULT_TARGET_KEYS
 
-        # Инициализация значений для прогресс-бара (чтобы сразу отобразить его корректно)
+        # Инициализация значений для прогресс-бара
         self.current_progress = 0
 
         # Безопасная загрузка целевого значения из конфигурации или stats_manager
+        self._load_initial_values()
+
+        # Инициализация UI с предзагруженными значениями
+        self.init_ui()
+
+    def _load_initial_values(self):
+        """Загружает начальные значения из конфигурации и stats_manager."""
         from config import config
         try:
             # Сначала пробуем загрузить из конфигурации
@@ -49,7 +245,6 @@ class HomeWidget(QWidget):
                 if hasattr(self.bot_engine.stats_manager, 'keys_target'):
                     self.target_keys = self.bot_engine.stats_manager.keys_target
                 else:
-                    # Если атрибута нет, инициализируем его
                     self.bot_engine.stats_manager.keys_target = self.target_keys
 
                 # Загружаем текущий прогресс для быстрой инициализации
@@ -57,85 +252,49 @@ class HomeWidget(QWidget):
                     self.current_progress = self.bot_engine.stats_manager.keys_current
                     self._py_logger.info(f"Быстрая инициализация прогресс-бара со значением: {self.current_progress}")
                 else:
-                    # Если атрибута нет, инициализируем его
                     self.bot_engine.stats_manager.keys_current = 0
                     self.current_progress = 0
         except Exception as e:
             self._py_logger.warning(f"Не удалось загрузить значения для прогресс-бара: {e}")
 
-        # Инициализация UI с предзагруженными значениями
-        self.init_ui()
-
     def start_bot(self):
         """Запуск бота."""
-        # Проверяем лицензию перед запуском, если валидатор доступен
-        if self._check_license() is False:
+        # Проверяем лицензию перед запуском
+        if not self.license_manager.check_license_for_start(self):
             return False
 
-        # Если лицензия валидна или не требуется проверка, запускаем бота
+        # Если лицензия валидна, запускаем бота
         if self.bot_engine.start():
-            # Обновляем элементы интерфейса
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-
-            # Меняем цвета кнопок: запустить - серая, остановить - красная
-            self.start_button.setActive(True)  # Запустить становится серой
-            self.stop_button.setActive(False)  # Остановить становится красной
-
+            self._update_button_states(bot_running=True)
             self.start_time = time.time()
             self.update_runtime()
-
-            # Обновляем отображение статистики
             self.update_stats(self.bot_engine.stats)
-
             return True
 
         return False
 
-    def _check_license(self):
-        """
-        Проверяет лицензию перед запуском бота.
+    def stop_bot(self):
+        """Остановка бота."""
+        if self.bot_engine.stop():
+            self._update_button_states(bot_running=False)
+            self.start_time = None
+            self.update_runtime()
+            return True
+        return False
 
-        Returns:
-            True если лицензия валидна или проверка не требуется,
-            False если лицензия недействительна
-        """
-        try:
-            if self.license_validator:
-                self._py_logger.info("Проверка лицензии перед запуском бота...")
-                if not self.license_validator.is_license_valid():
-                    self._py_logger.warning("Лицензия недействительна, запуск бота невозможен")
-                    # Показываем сообщение о необходимости активации лицензии
-                    from PyQt6.QtWidgets import QMessageBox
-                    result = QMessageBox.warning(
-                        self,
-                        "Требуется активация лицензии",
-                        "Для запуска бота необходимо активировать лицензию. "
-                        "Перейти на страницу активации лицензии?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.Yes
-                    )
+    def _update_button_states(self, bot_running):
+        """Обновляет состояние кнопок в зависимости от состояния бота."""
+        self.start_button.setEnabled(not bot_running)
+        self.stop_button.setEnabled(bot_running)
 
-                    if result == QMessageBox.StandardButton.Yes:
-                        # Попробуем найти родительское окно и переключиться на страницу лицензии
-                        from gui.main_window import MainWindow
-                        parent = self.parent()
-                        while parent:
-                            if isinstance(parent, MainWindow):
-                                parent.change_page("license")
-                                break
-                            parent = parent.parent()
-
-                    return False
-                else:
-                    self._py_logger.info("Лицензия действительна, запуск бота разрешен")
-                    return True
-            else:
-                self._py_logger.warning("Валидатор лицензии не доступен!")
-                return True  # Разрешаем запуск, если валидатор недоступен
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при проверке лицензии: {e}")
-            return True  # В случае ошибки разрешаем запуск
+        if bot_running:
+            # Запустить становится серой, остановить - красной
+            self.start_button.setActive(True)
+            self.stop_button.setActive(False)
+        else:
+            # Запустить становится зеленой, остановить - серой
+            self.start_button.setActive(False)
+            self.stop_button.setActive(True)
 
     def init_ui(self):
         """Инициализация интерфейса главной страницы."""
@@ -145,6 +304,22 @@ class HomeWidget(QWidget):
         layout.setSpacing(20)
 
         # Заголовок и статус
+        self._create_header(layout)
+
+        # Кнопки управления
+        self._create_control_buttons(layout)
+
+        # Карточки со статистикой
+        self._create_stats_section(layout)
+
+        # Прогресс сбора ключей
+        self._create_progress_section(layout)
+
+        # Показатели производительности
+        self._create_metrics_section(layout)
+
+    def _create_header(self, layout):
+        """Создает заголовок страницы."""
         header_layout = QVBoxLayout()
 
         # Заголовок страницы
@@ -168,7 +343,8 @@ class HomeWidget(QWidget):
 
         layout.addLayout(header_layout)
 
-        # Кнопки управления
+    def _create_control_buttons(self, layout):
+        """Создает кнопки управления."""
         control_layout = QHBoxLayout()
         control_layout.setSpacing(15)
 
@@ -188,7 +364,7 @@ class HomeWidget(QWidget):
         self.button_group.addButton(self.stop_button)
         control_layout.addWidget(self.stop_button)
 
-        # Добавляем код для начальной настройки: кнопка остановки должна быть серой по умолчанию
+        # Кнопка остановки должна быть серой по умолчанию
         self.stop_button.setActive(True)
 
         # Добавляем растягивающийся элемент для выравнивания кнопок по левому краю
@@ -196,57 +372,13 @@ class HomeWidget(QWidget):
 
         layout.addLayout(control_layout)
 
-        # Карточки со статистикой (4 карточки в ряд)
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(15)
-        stats_layout.setContentsMargins(0, 0, 0, 0)  # Убираем внутренние отступы
-
-        # Карточка с серебром (заменяем карточку с количеством боев)
-        self.silver_card = StatCard(
-            "Серебро собрано",
-            "0K",
-            Styles.COLORS["primary"],
-            "silver"
-        )
-        stats_layout.addWidget(self.silver_card)
-
-        # Карточка с победами
-        self.victories_card = StatCard(
-            "Победы",
-            "0",
-            Styles.COLORS["secondary"],
-            "victory"
-        )
-        stats_layout.addWidget(self.victories_card)
-
-        # Карточка с поражениями
-        self.defeats_card = StatCard(
-            "Поражения",
-            "0",
-            Styles.COLORS["accent"],
-            "defeat"
-        )
-        stats_layout.addWidget(self.defeats_card)
-
-        # Карточка с ключами - всегда начинается с 0 для текущей сессии
-        keys_collected = 0
-        self.keys_card = StatCard(
-            "Ключей собрано",
-            str(keys_collected),
-            Styles.COLORS["warning"],
-            "key"
-        )
-        stats_layout.addWidget(self.keys_card)
-
-        # Устанавливаем фиксированную высоту для контейнера карточек
-        stats_container = QWidget()
-        stats_container.setLayout(stats_layout)
-        stats_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        stats_container.setContentsMargins(0, 0, 0, 0)  # Убираем отступы контейнера
-
+    def _create_stats_section(self, layout):
+        """Создает секцию с карточками статистики."""
+        self.stats_cards, stats_container = UIBuilder.create_stats_cards()
         layout.addWidget(stats_container)
 
-        # Прогресс сбора ключей
+    def _create_progress_section(self, layout):
+        """Создает секцию прогресса ключей."""
         keys_progress_frame = QFrame()
         keys_progress_frame.setObjectName("section_box")
         keys_progress_layout = QVBoxLayout(keys_progress_frame)
@@ -254,7 +386,6 @@ class HomeWidget(QWidget):
         keys_progress_layout.setSpacing(0)
 
         # Создаем виджет прогресса ключей
-        # ВАЖНО: Используем предзагруженное значение self.current_progress для быстрой инициализации
         self._py_logger.info(f"Инициализация прогресс-бара со значением: {self.current_progress}/{self.target_keys}")
         self.keys_progress_bar = KeysProgressBar(target=self.target_keys, current=self.current_progress)
         self.keys_progress_bar.progress_reset.connect(self.reset_keys_progress)
@@ -262,7 +393,8 @@ class HomeWidget(QWidget):
 
         layout.addWidget(keys_progress_frame)
 
-        # Показатели производительности
+    def _create_metrics_section(self, layout):
+        """Создает секцию показателей производительности."""
         metrics_frame = QFrame()
         metrics_frame.setObjectName("section_box")
         metrics_layout = QVBoxLayout(metrics_frame)
@@ -276,86 +408,12 @@ class HomeWidget(QWidget):
         metrics_layout.addWidget(metrics_header)
 
         # Содержимое показателей
-        metrics_content = QWidget()
-        metrics_content_layout = QGridLayout(metrics_content)
-        metrics_content_layout.setContentsMargins(15, 15, 15, 15)
-
-        # Время работы
-        metrics_content_layout.addWidget(QLabel("Время работы:"), 0, 0)
-        self.runtime_label = QLabel("00:00:00")
-        self.runtime_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
-        metrics_content_layout.addWidget(self.runtime_label, 0, 1)
-
-        # Количество боев (перенесено из карточки)
-        metrics_content_layout.addWidget(QLabel("Боёв начато:"), 1, 0)
-        self.battles_label = QLabel("0")
-        self.battles_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
-        metrics_content_layout.addWidget(self.battles_label, 1, 1)
-
-        # Ключей за победу
-        metrics_content_layout.addWidget(QLabel("Ключей за победу:"), 2, 0)
-        self.keys_per_victory_label = QLabel("0")
-        self.keys_per_victory_label.setStyleSheet(f"color: {Styles.COLORS['warning']};")
-        metrics_content_layout.addWidget(self.keys_per_victory_label, 2, 1)
-
-        # Серебра за победу (новый показатель)
-        metrics_content_layout.addWidget(QLabel("Серебра за победу:"), 3, 0)
-        self.silver_per_victory_label = QLabel("0K")
-        self.silver_per_victory_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
-        metrics_content_layout.addWidget(self.silver_per_victory_label, 3, 1)
-
-        # Успешность
-        metrics_content_layout.addWidget(QLabel("Успешность:"), 4, 0)
-        self.success_rate_label = QLabel("0%")
-        self.success_rate_label.setStyleSheet(f"color: {Styles.COLORS['secondary']};")
-        metrics_content_layout.addWidget(self.success_rate_label, 4, 1)
-
-        # Потери соединения
-        metrics_content_layout.addWidget(QLabel("Потери соединения:"), 5, 0)
-        self.connection_losses_label = QLabel("0")
-        self.connection_losses_label.setStyleSheet(f"color: {Styles.COLORS['accent']};")
-        metrics_content_layout.addWidget(self.connection_losses_label, 5, 1)
-
-        # Ключей в час
-        metrics_content_layout.addWidget(QLabel("Ключей в час:"), 6, 0)
-        self.keys_per_hour_label = QLabel("0")
-        self.keys_per_hour_label.setStyleSheet(f"color: {Styles.COLORS['warning']};")
-        metrics_content_layout.addWidget(self.keys_per_hour_label, 6, 1)
-
-        # Серебра в час (новый показатель)
-        metrics_content_layout.addWidget(QLabel("Серебра в час:"), 7, 0)
-        self.silver_per_hour_label = QLabel("0K")
-        self.silver_per_hour_label.setStyleSheet(f"color: {Styles.COLORS['primary']};")
-        metrics_content_layout.addWidget(self.silver_per_hour_label, 7, 1)
-
-        # Растягиваем сетку показателей вниз
-        metrics_content_layout.setRowStretch(8, 1)
-
+        self.metrics_labels, metrics_content = UIBuilder.create_metrics_grid()
         metrics_layout.addWidget(metrics_content, 1)
         layout.addWidget(metrics_frame, 1)
 
-    def stop_bot(self):
-        """Остановка бота."""
-        if self.bot_engine.stop():
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-
-            # Меняем цвета кнопок: запустить - зеленая, остановить - серая
-            self.start_button.setActive(False)  # Запустить становится зеленой
-            self.stop_button.setActive(True)  # Остановить становится серой
-
-            self.start_time = None
-            self.update_runtime()
-            return True
-        return False
-
     def update_bot_state(self, state):
-        """
-        Обновляет отображение текущего состояния бота.
-
-        Args:
-            state (str): Состояние бота
-        """
+        """Обновляет отображение текущего состояния бота."""
         state_translations = {
             "IDLE": "Ожидание",
             "STARTING": "Запуск",
@@ -372,37 +430,58 @@ class HomeWidget(QWidget):
         self.status_label.setText(f"Статус: {translated_state}")
 
         # Разные цвета в зависимости от состояния
-        if state == "IDLE":
-            self.status_label.setStyleSheet(f"color: {Styles.COLORS['text_secondary']}; font-size: 14px;")
-        elif state in ["STARTING", "RECONNECTING"]:
-            self.status_label.setStyleSheet(f"color: {Styles.COLORS['warning']}; font-size: 14px;")
-        elif state in ["ERROR", "CONNECTION_LOST"]:
-            self.status_label.setStyleSheet(f"color: {Styles.COLORS['accent']}; font-size: 14px;")
-        else:
-            self.status_label.setStyleSheet(f"color: {Styles.COLORS['secondary']}; font-size: 14px;")
+        color_map = {
+            "IDLE": Styles.COLORS['text_secondary'],
+            "STARTING": Styles.COLORS['warning'],
+            "RECONNECTING": Styles.COLORS['warning'],
+            "ERROR": Styles.COLORS['accent'],
+            "CONNECTION_LOST": Styles.COLORS['accent']
+        }
+
+        color = color_map.get(state, Styles.COLORS['secondary'])
+        self.status_label.setStyleSheet(f"color: {color}; font-size: 14px;")
 
     def update_stats(self, stats):
-        """
-        Обновляет отображение статистики текущей сессии.
+        """Обновляет отображение статистики текущей сессии."""
+        # Рассчитываем все показатели через калькулятор
+        metrics = self.metrics_calculator.calculate_performance_metrics(stats, self.start_time)
 
-        Args:
-            stats (dict): Статистика текущей сессии
-        """
         # Обновляем карточки
-        self.battles_label.setText(str(stats.get("battles_started", 0)))
+        self.stats_cards["battles_label"] = self.metrics_labels["battles_label"]
+        self.metrics_labels["battles_label"].setText(str(metrics['battles']))
 
         # Форматируем значение серебра для карточки
-        silver_value = stats.get("silver_collected", 0)
-        silver_formatted = Styles.format_silver(silver_value)
-        self.silver_card.set_value(silver_formatted)
+        silver_formatted = Styles.format_silver(metrics['silver_collected'])
+        self.stats_cards["silver_card"].set_value(silver_formatted)
 
-        self.victories_card.set_value(str(stats.get("victories", 0)))
-        self.defeats_card.set_value(str(stats.get("defeats", 0)))
+        self.stats_cards["victories_card"].set_value(str(metrics['victories']))
+        self.stats_cards["defeats_card"].set_value(str(metrics['defeats']))
+        self.stats_cards["keys_card"].set_value(str(metrics['keys_collected']))
 
-        # Ключи - только текущая сессия
-        self.keys_card.set_value(str(stats.get("keys_collected", 0)))
+        # Обновляем показатели производительности
+        self._update_metrics_display(metrics)
 
-        # Обновляем прогресс-бар с использованием данных из StatsManager
+        # Обновляем прогресс-бар
+        self._update_progress_bar(stats)
+
+    def _update_metrics_display(self, metrics):
+        """Обновляет отображение показателей производительности."""
+        # Обновляем значения в интерфейсе
+        updates = {
+            "success_rate_label": f"{metrics['success_rate']:.1f}%",
+            "keys_per_victory_label": f"{metrics['keys_per_victory']:.1f}",
+            "silver_per_victory_label": Styles.format_silver(metrics['silver_per_victory']),
+            "connection_losses_label": str(metrics['connection_losses']),
+            "keys_per_hour_label": f"{metrics['keys_per_hour']:.1f}",
+            "silver_per_hour_label": Styles.format_silver(metrics['silver_per_hour'])
+        }
+
+        for label_name, value in updates.items():
+            if label_name in self.metrics_labels:
+                self.metrics_labels[label_name].setText(value)
+
+    def _update_progress_bar(self, stats):
+        """Обновляет прогресс-бар с использованием данных из StatsManager."""
         if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
             # Получаем информацию о прогрессе из StatsManager
             progress_info = self.bot_engine.stats_manager.get_keys_progress()
@@ -411,12 +490,10 @@ class HomeWidget(QWidget):
             is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
 
             if is_registered:
-                # Статистика уже добавлена в общий прогресс, не добавляем снова
                 total_progress = progress_info["current"]
                 self._py_logger.debug(
                     f"Прогресс-бар: сессия уже зарегистрирована, отображаем только общий прогресс {total_progress}")
             else:
-                # Статистика не была добавлена, добавляем ключи текущей сессии для отображения
                 total_progress = progress_info["current"] + stats.get("keys_collected", 0)
                 self._py_logger.debug(
                     f"Прогресс-бар: добавляем ключи текущей сессии {stats.get('keys_collected', 0)} к общему прогрессу {progress_info['current']}")
@@ -431,79 +508,13 @@ class HomeWidget(QWidget):
             # Если StatsManager недоступен, используем только ключи текущей сессии
             self.keys_progress_bar.update_values(stats.get("keys_collected", 0), target=self.target_keys)
 
-        # Обновляем показатели
-        self.connection_losses_label.setText(str(stats.get("connection_losses", 0)))
-
-        # Вычисляем процент успешности
-        battles = stats.get("victories", 0) + stats.get("defeats", 0)
-        if battles > 0:
-            success_rate = (stats.get("victories", 0) / battles) * 100
-            self.success_rate_label.setText(f"{success_rate:.1f}%")
-
-            # Вычисляем количество ключей за победу
-            victories = stats.get("victories", 0)
-            if victories > 0:
-                keys_per_victory = stats.get("keys_collected", 0) / victories
-                self.keys_per_victory_label.setText(f"{keys_per_victory:.1f}")
-
-                # Вычисляем количество серебра за победу - тоже уже в K
-                silver_per_victory = stats.get("silver_collected", 0) / victories
-                self.silver_per_victory_label.setText(Styles.format_silver(silver_per_victory))
-            else:
-                self.keys_per_victory_label.setText("0")
-                self.silver_per_victory_label.setText("0K")
-        else:
-            self.success_rate_label.setText("0%")
-            self.keys_per_victory_label.setText("0")
-            self.silver_per_victory_label.setText("0K")
-
-        # Вычисляем количество ключей и серебра в час
-        if self.start_time:
-            elapsed_hours = (time.time() - self.start_time) / 3600
-            if elapsed_hours > 0:
-                keys_per_hour = stats.get("keys_collected", 0) / elapsed_hours
-                self.keys_per_hour_label.setText(f"{keys_per_hour:.1f}")
-
-                # Используем format_silver для серебра в час
-                silver_per_hour = stats.get("silver_collected", 0) / elapsed_hours
-                self.silver_per_hour_label.setText(Styles.format_silver(silver_per_hour))
-            else:
-                self.keys_per_hour_label.setText("0")
-                self.silver_per_hour_label.setText("0K")
-        else:
-            self.keys_per_hour_label.setText("0")
-            self.silver_per_hour_label.setText("0K")
-
     def update_runtime(self):
         """Обновляет отображение времени работы бота."""
-        if self.start_time:
-            try:
-                elapsed = int(time.time() - self.start_time)
-                hours = elapsed // 3600
-                minutes = (elapsed % 3600) // 60
-                seconds = elapsed % 60
-                self.runtime_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-
-                # Обновляем ключей в час при наличии прошедшего времени
-                if elapsed > 0:
-                    keys_collected = self.bot_engine.stats.get("keys_collected", 0)
-                    elapsed_hours = elapsed / 3600.0
-                    keys_per_hour = keys_collected / elapsed_hours if elapsed_hours > 0 else 0
-                    self.keys_per_hour_label.setText(f"{keys_per_hour:.1f}")
-            except Exception as e:
-                print(f"Ошибка при обновлении времени: {e}")
-        else:
-            # Если бот не запущен, показываем нули
-            self.runtime_label.setText("00:00:00")
-            self.keys_per_hour_label.setText("0")
+        runtime_text = self.metrics_calculator.format_runtime(self.start_time)
+        self.metrics_labels["runtime_label"].setText(runtime_text)
 
     def set_target_keys(self, target):
-        """
-        Устанавливает цель по количеству ключей.
-
-        Args:
-            target (int): Целевое количество ключей
-        """
+        """Устанавливает цель по количеству ключей."""
         self.target_keys = target
 
         # Обновляем цель в менеджере статистики
@@ -525,8 +536,6 @@ class HomeWidget(QWidget):
 
     def reset_keys_progress(self):
         """Сбрасывает прогресс сбора ключей."""
-        # Больше не показываем диалог здесь, так как он уже показан в KeysProgressBar
-
         # Сбрасываем прогресс, используя StatsManager
         if hasattr(self.bot_engine, 'stats_manager') and self.bot_engine.stats_manager:
             # Сбрасываем прогресс в StatsManager
@@ -547,10 +556,7 @@ class HomeWidget(QWidget):
 
     def update_license_status(self):
         """Обновляет элементы интерфейса в зависимости от статуса лицензии."""
-        if not self.license_validator:
-            return
-
-        is_valid = self.license_validator.is_license_valid()
+        is_valid = self.license_manager.get_license_status()
 
         # Обновление состояния кнопки запуска бота
         self.start_button.setEnabled(not self.bot_engine.running.is_set())
@@ -559,8 +565,7 @@ class HomeWidget(QWidget):
         self._py_logger.debug(
             f"Обновление статуса лицензии в HomeWidget: {'действительна' if is_valid else 'недействительна'}")
 
-        # Если нужно, можно добавить визуальные индикаторы статуса лицензии
-        # Например, изменить текст подсказки для кнопки запуска
+        # Обновляем подсказки для кнопок
         if is_valid:
             self.start_button.setToolTip("Запустить бота")
         else:
