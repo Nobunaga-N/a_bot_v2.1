@@ -65,17 +65,17 @@ class OptimizedTimerManager:
     def start_timers(self):
         """Запускает все таймеры."""
         self.runtime_timer.start(1000)  # Обновление времени каждую секунду
-        self.stats_update_timer.start(5000)  # Обновление статистики каждые 5 секунд
+        self.stats_update_timer.start(8000)  # УВЕЛИЧИЛИ интервал до 8 секунд
         self._py_logger.debug("Таймеры запущены")
 
     def adjust_for_page(self, page_id: str):
         """Настраивает таймеры в зависимости от активной страницы."""
         if page_id == "stats":
             # Более частое обновление на странице статистики
-            self.stats_update_timer.setInterval(3000)  # Каждые 3 секунды
+            self.stats_update_timer.setInterval(5000)  # Каждые 5 секунд
         else:
             # Стандартная частота для других страниц
-            self.stats_update_timer.setInterval(5000)  # Каждые 5 секунд
+            self.stats_update_timer.setInterval(8000)  # Каждые 8 секунд
 
 
 class OptimizedUpdateManager:
@@ -230,6 +230,10 @@ class MainWindow(QMainWindow):
         self.license_validator = license_validator
         self._py_logger = logging.getLogger("BotLogger")
 
+        # Флаги для предотвращения множественных операций
+        self._page_switching = False
+        self._stats_animation_pending = False
+
         # Создание сигналов
         self.signals = BotSignals()
         self._connect_signals()
@@ -361,8 +365,8 @@ class MainWindow(QMainWindow):
         self.home_widget.set_target_keys(target_keys)
 
     def change_page(self, page_id):
-        """Изменяет отображаемую страницу с оптимизированной логикой анимации."""
-        if page_id not in self.page_indices:
+        """Изменяет отображаемую страницу с оптимизированной логикой."""
+        if page_id not in self.page_indices or self._page_switching:
             return
 
         old_page_index = self.stack.currentIndex()
@@ -372,43 +376,71 @@ class MainWindow(QMainWindow):
         if old_page_index == new_page_index:
             return
 
-        self.stack.setCurrentIndex(new_page_index)
+        # ИСПРАВЛЕНО: Устанавливаем флаг переключения страниц
+        self._page_switching = True
 
-        # Синхронизируем боковое меню
-        if hasattr(self, 'sidebar'):
-            self.sidebar.active_page = page_id
-            buttons = getattr(self.sidebar, 'buttons', {})
-            for p, button in buttons.items():
-                button.setChecked(p == page_id)
+        try:
+            self.stack.setCurrentIndex(new_page_index)
 
-        # УПРОЩЕННАЯ ЛОГИКА: анимация только при переходе на страницу статистики
-        if page_id == "stats":
-            self._py_logger.debug("Переход на страницу статистики")
+            # Синхронизируем боковое меню
+            if hasattr(self, 'sidebar'):
+                self.sidebar.active_page = page_id
+                buttons = getattr(self.sidebar, 'buttons', {})
+                for p, button in buttons.items():
+                    button.setChecked(p == page_id)
 
-            # Подготавливаем графики для анимации
-            QTimer.singleShot(200, self._prepare_stats_animation)
-        else:
-            # Для других страниц помечаем статистику как невидимую
-            if hasattr(self.stats_widget, '_is_currently_visible'):
-                self.stats_widget._is_currently_visible = False
+            # УПРОЩЕННАЯ ЛОГИКА: анимация только при переходе на страницу статистики
+            if page_id == "stats":
+                self._py_logger.debug("Переход на страницу статистики")
 
-        # Настраиваем частоту обновлений
-        self.timer_manager.adjust_for_page(page_id)
+                # Подготавливаем анимацию БЕЗ принудительной перезагрузки
+                QTimer.singleShot(300, self._prepare_stats_animation)
+            else:
+                # Для других страниц помечаем статистику как невидимую
+                if hasattr(self.stats_widget, '_is_currently_visible'):
+                    self.stats_widget._is_currently_visible = False
+
+            # Настраиваем частоту обновлений
+            self.timer_manager.adjust_for_page(page_id)
+
+        finally:
+            # Сбрасываем флаг переключения страниц
+            self._page_switching = False
 
     def _prepare_stats_animation(self):
         """Подготавливает и запускает анимацию графиков статистики."""
+        if self._stats_animation_pending:
+            self._py_logger.debug("Анимация статистики уже ожидает выполнения, пропускаем")
+            return
+
         try:
+            self._stats_animation_pending = True
+
             if hasattr(self, 'stats_widget') and self.stats_widget:
-                # Подготавливаем графики для анимации
+                # ИСПРАВЛЕНО: Подготавливаем графики для анимации
                 self.stats_widget.prepare_for_animation()
 
-                # Принудительно обновляем статистику с анимацией
-                self.stats_widget.refresh_statistics(enable_animation=True, force_reload=True)
+                # ИСПРАВЛЕНО: Выполняем анимацию БЕЗ принудительной перезагрузки данных
+                QTimer.singleShot(100, self._execute_stats_animation)
 
-                self._py_logger.debug("Анимация графиков статистики подготовлена и запущена")
+                self._py_logger.debug("Анимация статистики подготовлена")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при подготовке анимации статистики: {e}")
+            self._stats_animation_pending = False
+
+    def _execute_stats_animation(self):
+        """Выполняет отложенную анимацию статистики."""
+        try:
+            if hasattr(self, 'stats_widget') and self.stats_widget:
+                # Выполняем анимацию через метод виджета
+                self.stats_widget.execute_pending_animation()
+                self._py_logger.debug("Анимация статистики выполнена")
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при выполнении анимации статистики: {e}")
+        finally:
+            self._stats_animation_pending = False
 
     # Обработчики событий
     def update_bot_state(self, state):
@@ -438,7 +470,11 @@ class MainWindow(QMainWindow):
 
     def auto_update_statistics(self):
         """Автоматическое обновление статистики."""
-        # УПРОЩЕННАЯ ЛОГИКА: используем оптимизированный менеджер обновлений
+        # ИСПРАВЛЕНО: Пропускаем обновление если происходит переключение страниц или анимация
+        if self._page_switching or self._stats_animation_pending:
+            return
+
+        # Используем оптимизированный менеджер обновлений
         self.update_manager.update_stats_if_changed()
         self.update_manager.update_progress_if_needed()
 
