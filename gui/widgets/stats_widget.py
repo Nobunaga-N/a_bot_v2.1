@@ -551,7 +551,7 @@ class StatsWidget(QWidget):
             return
 
         try:
-            self._pending_animation = True  # Устанавливаем флаг ожидающей анимации
+            self._pending_animation = True
 
             charts = [
                 self.battles_chart_widget,
@@ -559,10 +559,12 @@ class StatsWidget(QWidget):
                 self.silver_chart_widget
             ]
 
+            # НОВОЕ: Подготавливаем оси с пустыми данными вместо полной очистки
             for chart in charts:
-                chart.set_should_animate_once()
+                chart.prepare_axes_for_animation()  # Отрисовываем оси
+                chart.set_should_animate_once()  # Устанавливаем флаг анимации
 
-            self._py_logger.debug("Графики подготовлены для анимации")
+            self._py_logger.debug("Графики подготовлены: оси отрисованы, готовы к анимации столбцов")
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при подготовке анимации: {e}")
@@ -672,5 +674,21 @@ class StatsWidget(QWidget):
         """Обработчик события скрытия виджета."""
         super().hideEvent(event)
         self._is_currently_visible = False
-        self._pending_animation = False  # Сбрасываем флаг анимации при скрытии
+        self._pending_animation = False
+
+        # Очищаем графики при выходе со страницы
+        try:
+            charts = [
+                self.battles_chart_widget,
+                self.keys_chart_widget,
+                self.silver_chart_widget
+            ]
+
+            for chart in charts:
+                chart.clear()  # Полная очистка при выходе
+
+            self._py_logger.debug("Графики полностью очищены при скрытии страницы")
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при очистке графиков: {e}")
+
         self._py_logger.debug("Страница статистики скрыта")

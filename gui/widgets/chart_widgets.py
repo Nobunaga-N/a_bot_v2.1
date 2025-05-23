@@ -251,19 +251,58 @@ class OptimizedChartWidget(QWidget):
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении данных графика {self.title}: {e}")
 
+    def prepare_axes_for_animation(self):
+        """Подготавливает график с осями но без данных для последующей анимации."""
+        if not self.html_path:
+            return
+
+        try:
+            # Создаем данные только с осями (пустые столбцы)
+            axes_only_data = {"dates": []}
+            for key in self.config['data_keys']:
+                axes_only_data[key] = []
+
+            # Если есть реальные данные, используем их даты для осей
+            if self._last_data and self._last_data.get("dates"):
+                axes_only_data["dates"] = self._last_data["dates"].copy()
+                for key in self.config['data_keys']:
+                    # Устанавливаем нули для всех значений чтобы оси были правильные
+                    axes_only_data[key] = [0] * len(axes_only_data["dates"])
+
+            # Читаем HTML шаблон
+            with open(self.html_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+
+            # Заменяем плейсхолдеры (без анимации)
+            updated_html = html_content.replace('{CONFIG_PLACEHOLDER}', json.dumps(self.config))
+            updated_html = updated_html.replace('{DATA_PLACEHOLDER}', json.dumps(axes_only_data))
+            updated_html = updated_html.replace('{ANIMATE_PLACEHOLDER}', 'false')
+
+            # Загружаем HTML с осями
+            base_url = QUrl.fromLocalFile(os.path.dirname(self.html_path) + "/")
+            self.web_view.setHtml(updated_html, base_url)
+
+            self._py_logger.debug(f"График {self.config['title']}: подготовлены оси для анимации")
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при подготовке осей для графика {self.config['title']}: {e}")
+
     def clear(self):
-        """Очищает график."""
+        """Очищает график полностью."""
         empty_data = {"dates": []}
         for key in self.config['data_keys']:
             empty_data[key] = []
+
+        self._last_data = empty_data
         self.update_chart(empty_data, force_no_animation=True)
 
     def showEvent(self, event):
         """Обработчик показа виджета."""
         super().showEvent(event)
-        # При показе виджета обновляем график если есть данные
-        if self._last_data and self.isVisible():
-            QTimer.singleShot(100, self._refresh_on_show)
+
+        # НЕ ДЕЛАЕМ АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ при показе
+        # Это должно контролироваться извне для анимации
+        pass
 
     def _refresh_on_show(self):
         """Обновляет график при показе без анимации."""

@@ -372,14 +372,13 @@ class MainWindow(QMainWindow):
         old_page_index = self.stack.currentIndex()
         new_page_index = self.page_indices[page_id]
 
-        # Если уже на этой странице, ничего не делаем
         if old_page_index == new_page_index:
             return
 
-        # ИСПРАВЛЕНО: Устанавливаем флаг переключения страниц
         self._page_switching = True
 
         try:
+            # Устанавливаем страницу
             self.stack.setCurrentIndex(new_page_index)
 
             # Синхронизируем боковое меню
@@ -389,12 +388,10 @@ class MainWindow(QMainWindow):
                 for p, button in buttons.items():
                     button.setChecked(p == page_id)
 
-            # УПРОЩЕННАЯ ЛОГИКА: анимация только при переходе на страницу статистики
             if page_id == "stats":
                 self._py_logger.debug("Переход на страницу статистики")
-
-                # Подготавливаем анимацию БЕЗ принудительной перезагрузки
-                QTimer.singleShot(300, self._prepare_stats_animation)
+                # УМЕНЬШИЛИ задержку до 50ms для более быстрой анимации
+                QTimer.singleShot(50, self._prepare_stats_animation)
             else:
                 # Для других страниц помечаем статистику как невидимую
                 if hasattr(self.stats_widget, '_is_currently_visible'):
@@ -404,7 +401,6 @@ class MainWindow(QMainWindow):
             self.timer_manager.adjust_for_page(page_id)
 
         finally:
-            # Сбрасываем флаг переключения страниц
             self._page_switching = False
 
     def _prepare_stats_animation(self):
@@ -433,8 +429,8 @@ class MainWindow(QMainWindow):
         """Выполняет отложенную анимацию статистики."""
         try:
             if hasattr(self, 'stats_widget') and self.stats_widget:
-                # Выполняем анимацию через метод виджета
-                self.stats_widget.execute_pending_animation()
+                # ВАЖНО: Выполняем только анимацию, без дополнительных обновлений
+                self.stats_widget.updater.update_trend_charts(enable_animation=True, force_reload=False)
                 self._py_logger.debug("Анимация статистики выполнена")
 
         except Exception as e:
