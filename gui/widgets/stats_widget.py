@@ -25,8 +25,6 @@ def handle_stats_errors(default_return=None):
                 return func(self, *args, **kwargs)
             except Exception as e:
                 self._py_logger.error(f"Ошибка в {func.__name__}: {e}")
-                import traceback
-                self._py_logger.error(traceback.format_exc())
                 return default_return
 
         return wrapper
@@ -34,8 +32,46 @@ def handle_stats_errors(default_return=None):
     return decorator
 
 
+class StatsDataCache:
+    """Кэш данных для избежания множественных загрузок."""
+
+    def __init__(self, logger):
+        self._py_logger = logger
+        self._cache = {}
+        self._cache_timestamps = {}
+        self._cache_duration = 30  # Кэш действителен 30 секунд
+
+    def get_cached_or_load(self, key, load_func, force_reload=False):
+        """Получает данные из кэша или загружает новые."""
+        current_time = time.time()
+
+        # Проверяем кэш
+        if not force_reload and key in self._cache:
+            cache_time = self._cache_timestamps.get(key, 0)
+            if current_time - cache_time < self._cache_duration:
+                self._py_logger.debug(f"Данные '{key}' получены из кэша")
+                return self._cache[key]
+
+        # Загружаем новые данные
+        data = load_func()
+        self._cache[key] = data
+        self._cache_timestamps[key] = current_time
+        self._py_logger.debug(f"Данные '{key}' загружены и кэшированы")
+        return data
+
+    def invalidate(self, key=None):
+        """Инвалидирует кэш."""
+        if key:
+            self._cache.pop(key, None)
+            self._cache_timestamps.pop(key, None)
+        else:
+            self._cache.clear()
+            self._cache_timestamps.clear()
+        self._py_logger.debug(f"Кэш {'полностью' if not key else key} инвалидирован")
+
+
 class StatsDataProvider:
-    """Централизованный провайдер данных статистики."""
+    """Оптимизированный провайдер данных статистики."""
 
     PERIOD_MAPPING = {0: "day", 1: "week", 2: "month", 3: "all"}
 
@@ -43,8 +79,7 @@ class StatsDataProvider:
         self.bot_engine = bot_engine
         self.period_combo = period_combo
         self._py_logger = logger
-        self._last_reload_time = 0
-        self._reload_interval = 30  # Перезагружаем данные не чаще чем раз в 30 секунд
+        self.cache = StatsDataCache(logger)
 
     @property
     def stats_manager(self):
@@ -67,71 +102,74 @@ class StatsDataProvider:
             return None
         return self.bot_engine.stats
 
-    def _should_reload_data(self, force_reload=False):
-        """Определяет, нужно ли перезагружать данные из файла."""
-        if force_reload:
-            return True
-
-        current_time = time.time()
-        if current_time - self._last_reload_time > self._reload_interval:
-            self._last_reload_time = current_time
-            return True
-        return False
-
     @handle_stats_errors(default_return={})
     def get_period_stats(self, include_current_session=True, force_reload=False):
-        """Получить статистику за период."""
+        """Получить статистику за период с кэшированием."""
         if not self.stats_manager:
             return {}
 
-        # Перезагружаем данные только при необходимости
-        if self._should_reload_data(force_reload):
-            self.stats_manager.load_stats()
-            self._py_logger.debug("Данные статистики перезагружены по расписанию")
+        cache_key = f"period_stats_{self.current_period}_{include_current_session}"
 
-        current_stats = self.current_session_stats if include_current_session else None
-        return self.stats_manager.get_stats_by_period_with_current_session(
-            self.current_period, current_stats
-        )
+        def load_data():
+            # ИСПРАВЛЕНО: загружаем данные только один раз
+            if force_reload:
+                self.stats_manager.load_stats()
+
+            current_stats = self.current_session_stats if include_current_session else None
+            return self.stats_manager.get_stats_by_period_with_current_session(
+                self.current_period, current_stats
+            )
+
+        return self.cache.get_cached_or_load(cache_key, load_data, force_reload)
 
     @handle_stats_errors(default_return={})
     def get_trend_data(self, include_current_session=True, force_reload=False):
-        """Получить данные трендов."""
+        """Получить данные трендов с кэшированием."""
         if not self.stats_manager:
             return {}
 
-        # Перезагружаем данные только при необходимости
-        if self._should_reload_data(force_reload):
-            self.stats_manager.load_stats()
-            self._py_logger.debug("Данные трендов перезагружены по расписанию")
+        cache_key = f"trend_data_{include_current_session}"
 
-        current_stats = self.current_session_stats if include_current_session else None
-        return self.stats_manager.get_trend_data_with_current_session(current_stats)
+        def load_data():
+            # ИСПРАВЛЕНО: избегаем повторной загрузки данных
+            if force_reload:
+                self.stats_manager.load_stats()
+
+            current_stats = self.current_session_stats if include_current_session else None
+            return self.stats_manager.get_trend_data_with_current_session(current_stats)
+
+        return self.cache.get_cached_or_load(cache_key, load_data, force_reload)
 
     @handle_stats_errors(default_return=[])
     def get_daily_stats(self, days=7, include_current_session=True, force_reload=False):
-        """Получить ежедневную статистику."""
+        """Получить ежедневную статистику с кэшированием."""
         if not self.stats_manager:
             return []
 
-        # Перезагружаем данные только при необходимости
-        if self._should_reload_data(force_reload):
-            self.stats_manager.load_stats()
-            self._py_logger.debug("Ежедневные данные перезагружены по расписанию")
+        cache_key = f"daily_stats_{days}_{include_current_session}"
 
-        current_stats = self.current_session_stats if include_current_session else None
-        return self.stats_manager.get_daily_stats_with_current_session(days, current_stats)
+        def load_data():
+            # ИСПРАВЛЕНО: избегаем повторной загрузки данных
+            if force_reload:
+                self.stats_manager.load_stats()
+
+            current_stats = self.current_session_stats if include_current_session else None
+            return self.stats_manager.get_daily_stats_with_current_session(days, current_stats)
+
+        return self.cache.get_cached_or_load(cache_key, load_data, force_reload)
+
+    def invalidate_cache(self):
+        """Инвалидирует весь кэш."""
+        self.cache.invalidate()
 
 
 class ComponentUpdater:
-    """Универсальный обновлятор компонентов интерфейса."""
+    """Обновлятор компонентов интерфейса."""
 
     def __init__(self, stats_widget, data_provider, logger):
         self.widget = stats_widget
         self.data_provider = data_provider
         self._py_logger = logger
-        self._last_chart_data = None
-        self._last_chart_hash = None
 
     @handle_stats_errors()
     def update_stats_cards(self, stats_data=None, force_reload=False):
@@ -159,23 +197,8 @@ class ComponentUpdater:
             self._py_logger.error(f"Ошибка при форматировании серебра: {e}")
             self.widget.total_silver_card.set_value("0K")
 
-    def _has_chart_data_changed(self, trend_data):
-        """Проверяет, изменились ли данные графиков."""
-        if not trend_data:
-            return False
-
-        # Создаем хеш данных для сравнения
-        data_string = str(sorted(trend_data.items()))
-        current_hash = hash(data_string)
-
-        if current_hash != self._last_chart_hash:
-            self._last_chart_hash = current_hash
-            self._last_chart_data = trend_data
-            return True
-        return False
-
     @handle_stats_errors()
-    def update_trend_charts(self, trend_data=None, enable_animation=False, force_reload=False, force_update=False):
+    def update_trend_charts(self, trend_data=None, enable_animation=False, force_reload=False):
         """Обновляет графики трендов."""
         if trend_data is None:
             trend_data = self.data_provider.get_trend_data(force_reload=force_reload)
@@ -185,17 +208,6 @@ class ComponentUpdater:
             self._clear_all_charts()
             return
 
-        # Проверяем, изменились ли данные (если не принудительное обновление и нет анимации)
-        if not force_update and not enable_animation and not self._has_chart_data_changed(trend_data):
-            self._py_logger.debug("Данные графиков не изменились, обновление пропущено")
-            return
-
-        # Логируем параметры обновления
-        animation_status = "с анимацией" if enable_animation else "без анимации"
-        update_reason = "принудительное" if force_update else "обычное"
-        self._py_logger.debug(f"Обновление графиков ({update_reason}) {animation_status}")
-
-        # Обновляем все графики
         chart_configs = [
             (self.widget.battles_chart_widget, "график боев"),
             (self.widget.keys_chart_widget, "график ключей"),
@@ -204,21 +216,39 @@ class ComponentUpdater:
 
         for chart_widget, chart_name in chart_configs:
             try:
-                # Проверяем видимость графика перед обновлением
                 if not chart_widget.isVisible():
-                    self._py_logger.debug(f"{chart_name} не видим, пропускаем обновление")
                     continue
 
-                # ВАЖНО: передаем правильный параметр для управления анимацией
-                chart_widget.update_chart(trend_data, force_no_animation=not enable_animation)
+                if enable_animation:
+                    chart_widget.set_should_animate_once()
 
-                self._py_logger.debug(f"Обновлен {chart_name} {animation_status}: {len(trend_data['dates'])} точек")
+                chart_widget.update_chart(trend_data, force_no_animation=not enable_animation)
+                self._py_logger.debug(f"Обновлен {chart_name}: {len(trend_data['dates'])} точек")
+
             except Exception as e:
                 self._py_logger.error(f"Ошибка при обновлении {chart_name}: {e}")
 
-        # Обновляем хеш данных, если обновление прошло успешно
-        if force_update or enable_animation:
-            self._has_chart_data_changed(trend_data)  # Обновляем хеш
+    @handle_stats_errors()
+    def update_chart_data_only(self, trend_data=None):
+        """Обновляет только данные в графиках для тултипов."""
+        if trend_data is None:
+            trend_data = self.data_provider.get_trend_data(include_current_session=True)
+
+        if not trend_data or len(trend_data.get("dates", [])) < 1:
+            return
+
+        charts = [
+            self.widget.battles_chart_widget,
+            self.widget.keys_chart_widget,
+            self.widget.silver_chart_widget
+        ]
+
+        for chart_widget in charts:
+            try:
+                if chart_widget.isVisible():
+                    chart_widget.update_data_only(trend_data)
+            except Exception as e:
+                self._py_logger.error(f"Ошибка при обновлении данных графика: {e}")
 
     @handle_stats_errors()
     def update_daily_stats_table(self, daily_stats=None, force_reload=False):
@@ -262,7 +292,7 @@ class ComponentUpdater:
 
 
 class StatsWidget(QWidget):
-    """Страница статистики и аналитики."""
+    """Оптимизированная страница статистики и аналитики."""
 
     request_refresh = pyqtSignal()
 
@@ -271,16 +301,13 @@ class StatsWidget(QWidget):
         self.bot_engine = bot_engine
         self._py_logger = logging.getLogger("BotLogger")
 
-        # Инициализация провайдеров
-        self.data_provider = None  # Будет инициализирован после создания UI
+        # Провайдеры и обновлятор
+        self.data_provider = None
         self.updater = None
 
-        # Флаги состояния
-        self._last_tab_visit_time = 0
+        # Состояние виджета
         self._is_currently_visible = False
-
-        # НОВЫЙ ФЛАГ: отслеживает переключения вкладок
-        self._tab_switched = False
+        self._charts_initialized = False
 
         # Инициализация UI
         self.init_ui()
@@ -289,14 +316,18 @@ class StatsWidget(QWidget):
         self.data_provider = StatsDataProvider(self.bot_engine, self.period_combo, self._py_logger)
         self.updater = ComponentUpdater(self, self.data_provider, self._py_logger)
 
-        # Подключаем таймер автоматического обновления
+        # Таймер для автоматического обновления тултипов
+        self.tooltip_timer = QTimer(self)
+        self.tooltip_timer.timeout.connect(self.update_tooltips_only)
+        self.tooltip_timer.start(3000)  # Обновление тултипов каждые 3 секунды
+
+        # Таймер для обновления карточек и таблиц
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.auto_refresh_statistics)
-        self.update_timer.start(5000)  # Увеличиваем интервал до 5 секунд
+        self.update_timer.start(5000)  # Обновление каждые 5 секунд
 
     def init_ui(self):
         """Инициализация интерфейса страницы статистики."""
-        # Основной лэйаут
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(20)
@@ -340,7 +371,7 @@ class StatsWidget(QWidget):
         """)
         title_layout.addWidget(title_label)
 
-        subtitle_label = QLabel("Детальная статистика работы бота (обновляется автоматически)")
+        subtitle_label = QLabel("Детальная статистика работы бота")
         subtitle_label.setObjectName("subtitle")
         subtitle_label.setStyleSheet(f"""
             font-size: 14px;
@@ -483,37 +514,54 @@ class StatsWidget(QWidget):
         daily_stats_layout_frame.addWidget(self.daily_stats_table, 1)
         daily_stats_layout.addWidget(daily_stats_frame, 1)
 
-    # НОВЫЙ МЕТОД: устанавливает флаг переключения вкладок
-    def set_tab_switched(self, switched=True):
-        """Устанавливает флаг переключения вкладок для включения анимации."""
-        pass  # Метод больше не используется
-
-    def auto_refresh_statistics(self):
-        """Автоматически обновляет статистику с текущей сессией."""
-        if not self.bot_engine.running.is_set():
-            return
-
+    def prepare_for_animation(self):
+        """Подготавливает графики для анимации при следующем обновлении."""
         if not self._is_currently_visible:
-            # Если страница не видима, не обновляем (оптимизация)
             return
 
         try:
-            # Обновляем карточки и таблицу (они быстрые)
+            charts = [
+                self.battles_chart_widget,
+                self.keys_chart_widget,
+                self.silver_chart_widget
+            ]
+
+            for chart in charts:
+                chart.set_should_animate_once()
+
+            self._py_logger.debug("Графики подготовлены для анимации")
+
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при подготовке анимации: {e}")
+
+    def update_tooltips_only(self):
+        """Обновляет только тултипы в графиках."""
+        if not self.bot_engine.running.is_set() or not self._is_currently_visible:
+            return
+
+        try:
+            self.updater.update_chart_data_only()
+        except Exception as e:
+            self._py_logger.error(f"Ошибка при обновлении тултипов: {e}")
+
+    def auto_refresh_statistics(self):
+        """Автоматически обновляет статистику."""
+        if not self._is_currently_visible:
+            return
+
+        try:
+            # Обновляем карточки и таблицы без перезагрузки данных
             self.updater.update_stats_cards()
             self.updater.update_daily_stats_table()
 
-            # Графики обновляем БЕЗ анимации при автоматическом обновлении
-            self.updater.update_trend_charts(enable_animation=False)
-
-            self._py_logger.debug("Автоматическое обновление статистики выполнено без анимации")
-
         except Exception as e:
-            self._py_logger.error(f"Ошибка при автоматическом обновлении статистики: {e}")
+            self._py_logger.error(f"Ошибка при автоматическом обновлении: {e}")
 
     def update_stats_period(self):
         """Обновляет статистику на основе выбранного периода."""
         self._py_logger.info(f"Изменение периода статистики на: {self.data_provider.current_period}")
-        # При смене периода БЕЗ анимации (это не переключение вкладок)
+        # Инвалидируем кэш при смене периода
+        self.data_provider.invalidate_cache()
         self.refresh_statistics(force_reload=True, enable_animation=False)
 
     @handle_stats_errors()
@@ -527,33 +575,30 @@ class StatsWidget(QWidget):
             if show_message:
                 self._py_logger.debug("Обновление статистики запущено...")
 
-            # УПРОЩЕННАЯ ЛОГИКА: анимация включается только при явной передаче enable_animation=True
+            # ИСПРАВЛЕНО: инвалидируем кэш при принудительном обновлении
+            if force_reload:
+                self.data_provider.invalidate_cache()
+
             should_animate = enable_animation is True
 
-            if should_animate:
-                self._py_logger.debug("Анимация графиков включена (явно запрошена)")
-            else:
-                self._py_logger.debug("Анимация графиков отключена")
-
-            # Обновляем все компоненты
+            # Обновляем компоненты
             self.updater.update_stats_cards(force_reload=force_reload)
             self.updater.update_trend_charts(
                 enable_animation=should_animate,
-                force_reload=force_reload,
-                force_update=force_reload  # Принудительное обновление при перезагрузке
+                force_reload=force_reload
             )
             self.updater.update_daily_stats_table(force_reload=force_reload)
 
             if show_message:
                 animation_status = "с анимацией" if should_animate else "без анимации"
-                self._py_logger.debug(f"Обновление статистики завершено успешно {animation_status}")
+                self._py_logger.debug(f"Обновление статистики завершено {animation_status}")
 
             self.request_refresh.emit()
 
         except Exception as e:
             self._py_logger.error(f"Ошибка при обновлении статистики: {e}")
 
-    # Методы совместимости для внешнего API
+    # Публичные методы для совместимости
     def update_stats_cards(self):
         """Публичный метод для обновления карточек."""
         if self.updater:
@@ -562,8 +607,7 @@ class StatsWidget(QWidget):
     def update_trend_charts(self, trend_data=None, allow_animation=False):
         """Публичный метод для обновления графиков."""
         if self.updater:
-            # ВНИМАНИЕ: исправляем параметр для совместимости
-            self.updater.update_trend_charts(trend_data, enable_animation=allow_animation, force_update=True)
+            self.updater.update_trend_charts(trend_data, enable_animation=allow_animation)
 
     def update_daily_stats_table(self, daily_stats=None):
         """Публичный метод для обновления таблицы."""
@@ -574,45 +618,10 @@ class StatsWidget(QWidget):
         """Обработчик события показа виджета статистики."""
         super().showEvent(event)
         self._is_currently_visible = True
-
-        # ДОБАВЛЕНО: Обеспечиваем видимость всех графиков при показе страницы
-        QTimer.singleShot(50, self._ensure_charts_visibility)
-
         self._py_logger.debug("Страница статистики показана")
-
-    def _ensure_charts_visibility(self):
-        """Обеспечивает правильную видимость графиков."""
-        try:
-            # Убеждаемся что все графики видимы
-            charts = [
-                self.battles_chart_widget,
-                self.keys_chart_widget,
-                self.silver_chart_widget
-            ]
-
-            for chart in charts:
-                if chart and hasattr(chart, 'web_view'):
-                    chart.web_view.show()
-
-            self._py_logger.debug("Видимость графиков обеспечена")
-        except Exception as e:
-            self._py_logger.error(f"Ошибка при обеспечении видимости графиков: {e}")
 
     def hideEvent(self, event):
         """Обработчик события скрытия виджета."""
         super().hideEvent(event)
         self._is_currently_visible = False
         self._py_logger.debug("Страница статистики скрыта")
-
-    # Убранные методы для совместимости (оставляем пустыми)
-    def toggle_auto_refresh(self, state):
-        """Метод для совместимости - автообновление всегда включено."""
-        pass
-
-    def _show_update_success_message(self):
-        """Метод для совместимости - больше не показываем сообщения."""
-        pass
-
-    def _set_loading_state(self, loading):
-        """Метод для совместимости - больше нет кнопок для управления."""
-        pass

@@ -45,175 +45,91 @@ def safe_stats_operation(default_return=None):
     return decorator
 
 
-class TimerManager:
-    """Менеджер таймеров для централизованного управления."""
+class OptimizedTimerManager:
+    """Оптимизированный менеджер таймеров."""
 
     def __init__(self, main_window):
         self.main_window = main_window
         self._py_logger = main_window._py_logger
 
-        # Создаем таймеры
-        self.stats_timer = QTimer(main_window)
+        # Основные таймеры
+        self.runtime_timer = QTimer(main_window)
         self.stats_update_timer = QTimer(main_window)
 
-        # Настраиваем таймеры
-        self.stats_timer.timeout.connect(main_window.update_runtime)
+        # Настройка таймеров
+        self.runtime_timer.timeout.connect(main_window.update_runtime)
         self.stats_update_timer.timeout.connect(main_window.auto_update_statistics)
 
-        # Переменные для отслеживания обновлений
-        self._last_charts_update = 0
-        self._last_stats_update = 0
-        self._last_progress_update = 0
-
-        self._py_logger.debug("TimerManager инициализирован")
+        self._py_logger.debug("OptimizedTimerManager инициализирован")
 
     def start_timers(self):
         """Запускает все таймеры."""
-        self.stats_timer.start(1000)  # Каждую секунду
-        self.stats_update_timer.start(5000)  # Каждые 5 секунд
+        self.runtime_timer.start(1000)  # Обновление времени каждую секунду
+        self.stats_update_timer.start(5000)  # Обновление статистики каждые 5 секунд
         self._py_logger.debug("Таймеры запущены")
 
-    def adjust_update_frequency(self, page_id: str):
-        """Настраивает частоту обновлений в зависимости от страницы."""
+    def adjust_for_page(self, page_id: str):
+        """Настраивает таймеры в зависимости от активной страницы."""
         if page_id == "stats":
             # Более частое обновление на странице статистики
-            self.stats_update_timer.setInterval(1000)  # Каждую секунду
+            self.stats_update_timer.setInterval(3000)  # Каждые 3 секунды
         else:
             # Стандартная частота для других страниц
             self.stats_update_timer.setInterval(5000)  # Каждые 5 секунд
 
-    def should_update_charts(self, update_interval=3) -> bool:
-        """Проверяет, нужно ли обновлять графики."""
-        current_time = time.time()
-        if current_time - self._last_charts_update > update_interval:
-            self._last_charts_update = current_time
-            return True
-        return False
 
-    def should_update_stats(self, update_interval=15) -> bool:
-        """Проверяет, нужно ли обновлять статистику."""
-        current_time = time.time()
-        if current_time - self._last_stats_update > update_interval:
-            self._last_stats_update = current_time
-            return True
-        return False
-
-    def should_update_progress(self, update_interval=5) -> bool:
-        """Проверяет, нужно ли обновлять прогресс."""
-        current_time = time.time()
-        if current_time - self._last_progress_update > update_interval:
-            self._last_progress_update = current_time
-            return True
-        return False
-
-
-class UpdateManager:
-    """Менеджер обновлений для централизации логики."""
+class OptimizedUpdateManager:
+    """Оптимизированный менеджер обновлений."""
 
     def __init__(self, main_window):
         self.main_window = main_window
         self.bot_engine = main_window.bot_engine
         self._py_logger = main_window._py_logger
+
+        # Кэш последнего хеша статистики для избежания лишних обновлений
         self.last_stats_hash = ""
-        self._last_chart_update = 0
 
-    @safe_stats_operation()
-    def update_charts_if_needed(self):
-        """Обновляет графики если необходимо."""
-        # Проверяем, что мы на странице статистики
-        if self.main_window.stack.currentIndex() != self.main_window.page_indices.get("stats", -1):
-            return
+    def should_update_stats(self):
+        """Проверяет, нужно ли обновлять статистику."""
+        if not self.bot_engine.running.is_set():
+            return False
 
-        # Ограничиваем частоту обновления графиков
-        current_time = time.time()
-        if current_time - self._last_chart_update < 3:  # Не чаще раз в 3 секунды
-            return
+        is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
+        if is_registered:
+            return False
 
-        if not self.main_window.timer_manager.should_update_charts():
-            return
+        # Проверяем изменения в статистике
+        current_stats = self.bot_engine.stats
+        current_hash = hash(frozenset(current_stats.items()))
 
-        self._last_chart_update = current_time
+        if str(current_hash) != self.last_stats_hash:
+            self.last_stats_hash = str(current_hash)
+            return True
 
-        if self.bot_engine.running.is_set():
-            try:
-                # ВАЖНО: Для автоматических обновлений ВСЕГДА БЕЗ анимации
-                stats_widget = self.main_window.stats_widget
-
-                # Обновляем только если виджет видимый
-                if hasattr(stats_widget, '_is_currently_visible') and stats_widget._is_currently_visible:
-                    # Используем внутренний метод обновления графиков с проверкой изменений
-                    if hasattr(stats_widget, 'updater') and stats_widget.updater:
-                        # ИСПРАВЛЕНО: используем правильный параметр enable_animation=False
-                        stats_widget.updater.update_trend_charts(enable_animation=False)
-
-                    # Обновляем карточки и таблицы
-                    stats_widget.update_stats_cards()
-                    stats_widget.update_daily_stats_table()
-
-                    self._py_logger.debug("Автоматическое обновление графиков выполнено без анимации")
-
-            except Exception as e:
-                self._py_logger.error(f"Ошибка при обновлении графиков: {e}")
+        return False
 
     @safe_stats_operation()
     def update_stats_if_changed(self):
         """Обновляет статистику если данные изменились."""
-        if not self.bot_engine.running.is_set():
-            # Если бот не запущен, обновляем реже
-            if not self.main_window.timer_manager.should_update_stats():
-                return
-
-            # Проверяем, что виджет видимый
-            if (hasattr(self.main_window, 'stats_widget') and
-                    hasattr(self.main_window.stats_widget, '_is_currently_visible') and
-                    self.main_window.stats_widget._is_currently_visible):
-                self.main_window.stats_widget.update_stats_cards()
-                self.main_window.stats_widget.update_daily_stats_table()
-                self._py_logger.debug("Статистика обновлена (бот остановлен)")
+        if not self.should_update_stats():
             return
 
-        # Проверяем изменения в статистике
-        is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
-
-        if not is_registered:
-            current_stats = self.bot_engine.stats
-            current_hash = hash(frozenset(current_stats.items()))
-
-            if str(current_hash) != self.last_stats_hash:
-                self.last_stats_hash = str(current_hash)
-
-                # Обновляем только карточки и таблицу, не графики (они обновляются отдельно)
-                if (hasattr(self.main_window, 'stats_widget') and
-                        hasattr(self.main_window.stats_widget, '_is_currently_visible') and
-                        self.main_window.stats_widget._is_currently_visible):
-                    self.main_window.stats_widget.update_stats_cards()
-                    self.main_window.stats_widget.update_daily_stats_table()
-
-                self._py_logger.debug("Статистика обновлена (изменения обнаружены)")
+        # Обновляем только карточки и таблицы, не графики
+        if hasattr(self.main_window, 'stats_widget') and self.main_window.stats_widget._is_currently_visible:
+            self.main_window.stats_widget.update_stats_cards()
+            self.main_window.stats_widget.update_daily_stats_table()
+            self._py_logger.debug("Статистика обновлена (изменения обнаружены)")
 
     @safe_stats_operation()
     def update_progress_if_needed(self):
         """Обновляет прогресс-бар если необходимо."""
-        if not self.main_window.timer_manager.should_update_progress():
-            return
-
         # Только для главной страницы
         if self.main_window.stack.currentIndex() != self.main_window.page_indices.get("home", -1):
             return
 
-        # Проверяем изменения в прогрессе
         home_widget = self.main_window.home_widget
-        current_display = home_widget.keys_progress_bar.current
-
-        total_progress = self.bot_engine.stats_manager.keys_current
-        is_registered = getattr(self.bot_engine, 'session_stats_registered', False)
-
-        if not is_registered:
-            total_progress += self.bot_engine.stats.get("keys_collected", 0)
-
-        if current_display != total_progress:
+        if hasattr(home_widget, 'update_stats'):
             home_widget.update_stats(self.bot_engine.stats)
-            self._py_logger.debug(f"Прогресс обновлен: {total_progress}")
 
 
 class ExportManager:
@@ -227,7 +143,6 @@ class ExportManager:
     @safe_stats_operation()
     def export_statistics(self):
         """Экспортирует статистику в CSV файл."""
-        # Запрашиваем имя файла
         filename, _ = QFileDialog.getSaveFileName(
             self.main_window,
             "Экспорт статистики",
@@ -306,7 +221,7 @@ class ExportManager:
 
 
 class MainWindow(QMainWindow):
-    """Главное окно приложения."""
+    """Оптимизированное главное окно приложения."""
 
     def __init__(self, bot_engine, license_validator):
         super().__init__()
@@ -323,8 +238,8 @@ class MainWindow(QMainWindow):
         self.bot_engine.set_signals(self.signals)
 
         # Инициализация менеджеров
-        self.timer_manager = TimerManager(self)
-        self.update_manager = UpdateManager(self)
+        self.timer_manager = OptimizedTimerManager(self)
+        self.update_manager = OptimizedUpdateManager(self)
         self.export_manager = ExportManager(self)
 
         # Инициализация UI
@@ -446,7 +361,7 @@ class MainWindow(QMainWindow):
         self.home_widget.set_target_keys(target_keys)
 
     def change_page(self, page_id):
-        """Изменяет отображаемую страницу."""
+        """Изменяет отображаемую страницу с оптимизированной логикой анимации."""
         if page_id not in self.page_indices:
             return
 
@@ -466,47 +381,34 @@ class MainWindow(QMainWindow):
             for p, button in buttons.items():
                 button.setChecked(p == page_id)
 
-        # Специальная обработка для страницы статистики
+        # УПРОЩЕННАЯ ЛОГИКА: анимация только при переходе на страницу статистики
         if page_id == "stats":
-            # Помечаем виджет как видимый
-            if hasattr(self.stats_widget, '_is_currently_visible'):
-                self.stats_widget._is_currently_visible = True
+            self._py_logger.debug("Переход на страницу статистики")
 
-            # Даем время на отрисовку интерфейса, затем обновляем с анимацией
-            QTimer.singleShot(200, lambda: self._animate_stats_charts())
-            self._py_logger.debug("Переход на страницу статистики - анимация будет запущена")
+            # Подготавливаем графики для анимации
+            QTimer.singleShot(200, self._prepare_stats_animation)
         else:
             # Для других страниц помечаем статистику как невидимую
             if hasattr(self.stats_widget, '_is_currently_visible'):
                 self.stats_widget._is_currently_visible = False
 
         # Настраиваем частоту обновлений
-        self.timer_manager.adjust_update_frequency(page_id)
+        self.timer_manager.adjust_for_page(page_id)
 
-    def _animate_stats_charts(self):
-        """Запускает анимацию графиков статистики при переключении на вкладку."""
+    def _prepare_stats_animation(self):
+        """Подготавливает и запускает анимацию графиков статистики."""
         try:
             if hasattr(self, 'stats_widget') and self.stats_widget:
+                # Подготавливаем графики для анимации
+                self.stats_widget.prepare_for_animation()
+
                 # Принудительно обновляем статистику с анимацией
                 self.stats_widget.refresh_statistics(enable_animation=True, force_reload=True)
-                self._py_logger.debug("Анимация графиков статистики запущена")
+
+                self._py_logger.debug("Анимация графиков статистики подготовлена и запущена")
+
         except Exception as e:
-            self._py_logger.error(f"Ошибка при запуске анимации графиков: {e}")
-
-    def _setup_stats_animation(self):
-        """Настраивает анимацию для страницы статистики."""
-        chart_widgets = [
-            self.stats_widget.battles_chart_widget,
-            self.stats_widget.keys_chart_widget,
-            self.stats_widget.silver_chart_widget
-        ]
-
-        for chart_widget in chart_widgets:
-            if hasattr(chart_widget, 'should_animate_next'):
-                chart_widget.should_animate_next = True
-                chart_widget.has_animated_since_show = False
-
-        self._py_logger.debug("Анимация графиков настроена для показа")
+            self._py_logger.error(f"Ошибка при подготовке анимации статистики: {e}")
 
     # Обработчики событий
     def update_bot_state(self, state):
@@ -534,15 +436,9 @@ class MainWindow(QMainWindow):
                 self.home_widget.start_time = None
                 self.home_widget.update_runtime()
 
-    @safe_stats_operation()
-    def refresh_statistics(self):
-        """Обновляет все отображения статистики."""
-        self.stats_widget.refresh_statistics()
-
     def auto_update_statistics(self):
         """Автоматическое обновление статистики."""
-        # Используем менеджер обновлений для централизованной логики
-        self.update_manager.update_charts_if_needed()
+        # УПРОЩЕННАЯ ЛОГИКА: используем оптимизированный менеджер обновлений
         self.update_manager.update_stats_if_changed()
         self.update_manager.update_progress_if_needed()
 
