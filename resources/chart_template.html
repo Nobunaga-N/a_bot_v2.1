@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AoM Bot Chart</title>
+    <style>
+        :root {
+            --bg-color: #171D33;
+            --grid-color: #28304d;
+            --text-color: #FFFFFF;
+            --text-secondary: #9BA0BC;
+            --primary-color: #3FE0C8;
+            --secondary-color: #FF6B6C;
+            --tooltip-bg: #2A3158;
+            --tooltip-border: #353E65;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #chart-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .tooltip {
+            position: absolute;
+            display: none;
+            background-color: var(--tooltip-bg);
+            border: 1px solid var(--tooltip-border);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text-color);
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            transition: all 0.1s ease;
+            max-width: 200px;
+            word-wrap: break-word;
+        }
+
+        .tooltip strong {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--primary-color);
+        }
+
+        .no-data {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--text-secondary);
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="chart-container">
+        <canvas id="chart-canvas"></canvas>
+        <div id="tooltip" class="tooltip"></div>
+        <div id="no-data" class="no-data" style="display:none;">Нет данных для отображения</div>
+    </div>
+
+    <script>
+        // Глобальные переменные (будут заменены Python кодом)
+        const CHART_CONFIG = {CONFIG_PLACEHOLDER};
+        const CHART_DATA = {DATA_PLACEHOLDER};
+        const SHOULD_ANIMATE = {ANIMATE_PLACEHOLDER};
+
+        // Состояние графика
+        const chartState = {
+            canvas: null,
+            ctx: null,
+            tooltip: document.getElementById('tooltip'),
+            noDataMessage: document.getElementById('no-data'),
+            hoveredBar: null,
+            bars: [],
+            axesDrawn: false,
+            layout: {
+                padding: null,
+                graphArea: { x: 0, y: 0, width: 0, height: 0 }
+            },
+            animation: {
+                progress: 0,
+                startTime: 0,
+                isAnimating: false
+            }
+        };
+
+        // Форматировщики значений
+        const formatters = {
+            number: (num) => num.toLocaleString('ru-RU'),
+            silver: (value) => {
+                if (value === null || value === undefined || value === 0) return "0K";
+                if (value < 1) return value.toFixed(1).replace('.0', '') + "K";
+                if (value < 1000) {
+                    const formatted = value.toFixed(1);
+                    return formatted.endsWith('.0') ? Math.floor(value) + "K" : formatted + "K";
+                }
+                if (value < 1000000) {
+                    const millions = value / 1000;
+                    const formatted = millions.toFixed(1);
+                    return formatted.endsWith('.0') ? Math.floor(millions) + "млн" : formatted + "млн";
+                }
+                if (value < 1000000000) {
+                    const billions = value / 1000000;
+                    const formatted = billions.toFixed(1);
+                    return formatted.endsWith('.0') ? Math.floor(billions) + "млрд" : formatted + "млрд";
+                }
+                const trillions = value / 1000000000;
+                const formatted = trillions.toFixed(1);
+                return formatted.endsWith('.0') ? Math.floor(trillions) + "трлн" : formatted + "трлн";
+            }
+        };
+
+        // Функции расчета шага оси
+        const axisStepFunctions = {
+            calculateBattlesAxisStep: (maxValue) => {
+                if (maxValue <= 5) return 1;
+                if (maxValue <= 20) return 5;
+                if (maxValue <= 50) return 10;
+                if (maxValue <= 100) return 20;
+                if (maxValue <= 500) return 100;
+                const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+                return Math.ceil(maxValue / 5 / magnitude) * magnitude;
+            },
+            calculateKeysAxisStep: (maxValue) => {
+                if (maxValue <= 5) return 1;
+                if (maxValue <= 20) return 5;
+                if (maxValue <= 50) return 10;
+                if (maxValue <= 100) return 20;
+                if (maxValue <= 500) return 100;
+                if (maxValue <= 1000) return 200;
+                if (maxValue <= 5000) return 1000;
+                if (maxValue <= 10000) return 2000;
+                if (maxValue <= 50000) return 10000;
+                const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+                return Math.ceil(maxValue / 5 / magnitude) * magnitude;
+            },
+            calculateSilverAxisStep: (maxValue) => {
+                if (maxValue <= 5) return 1;
+                if (maxValue <= 10) return 2;
+                if (maxValue <= 25) return 5;
+                if (maxValue <= 50) return 10;
+                if (maxValue <= 100) return 20;
+                if (maxValue <= 200) return 50;
+                if (maxValue <= 500) return 100;
+                if (maxValue <= 1000) return 200;
+                const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+                return Math.ceil(maxValue / 5 / magnitude) * magnitude;
+            }
+        };
+
+        function initializeCanvas() {
+            const canvas = document.getElementById('chart-canvas');
+            const ctx = canvas.getContext('2d');
+
+            chartState.canvas = canvas;
+            chartState.ctx = ctx;
+
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+
+            return { canvas, ctx, rect };
+        }
+
+        function calculateLayout(rect) {
+            const width = rect.width;
+            const height = rect.height;
+
+            const padding = {
+                left: Math.max(40, width * 0.06),
+                right: Math.max(20, width * 0.03),
+                top: Math.max(15, height * 0.06),
+                bottom: Math.max(25, height * 0.1)
+            };
+
+            chartState.layout.padding = padding;
+            chartState.layout.graphArea = {
+                x: padding.left,
+                y: padding.top,
+                width: width - padding.left - padding.right,
+                height: height - padding.top - padding.bottom
+            };
+
+            return padding;
+        }
+
+        function getMaxValue() {
+            let maxValue = 0;
+
+            if (CHART_CONFIG.type === 'dual_bars') {
+                for (let i = 0; i < CHART_DATA.dates.length; i++) {
+                    const total = (CHART_DATA.victories[i] || 0) + (CHART_DATA.defeats[i] || 0);
+                    maxValue = Math.max(maxValue, total);
+                }
+            } else {
+                const dataKey = CHART_CONFIG.data_keys[0];
+                if (CHART_DATA[dataKey]) {
+                    CHART_DATA[dataKey].forEach(value => {
+                        maxValue = Math.max(maxValue, value || 0);
+                    });
+                }
+            }
+
+            return maxValue || 10;
+        }
+
+        function drawAxes() {
+            const { ctx, rect } = initializeCanvas();
+            const padding = calculateLayout(rect);
+            const maxValue = getMaxValue();
+
+            const baselineY = rect.height - padding.bottom;
+            const baselineX = padding.left;
+            const graphWidth = chartState.layout.graphArea.width;
+            const graphHeight = chartState.layout.graphArea.height;
+            const fontSize = rect.width < 400 ? 8 : rect.width < 600 ? 9 : 10;
+
+            // Очищаем canvas
+            ctx.clearRect(0, 0, rect.width, rect.height);
+
+            // Фон области графика
+            ctx.fillStyle = 'rgba(20, 26, 47, 0.5)';
+            ctx.fillRect(padding.left, padding.top, graphWidth, graphHeight);
+
+            // Сетка
+            ctx.strokeStyle = 'rgba(40, 48, 77, 0.8)';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+
+            // Горизонтальные линии сетки
+            const stepFunc = axisStepFunctions[CHART_CONFIG.axis_step_func];
+            const step = stepFunc(maxValue);
+            const numLines = Math.floor(maxValue / step) + 1;
+
+            for (let i = 0; i < numLines; i++) {
+                const value = i * step;
+                const y = baselineY - (value / maxValue) * graphHeight;
+
+                ctx.moveTo(baselineX, y);
+                ctx.lineTo(baselineX + graphWidth, y);
+
+                // Подписи оси Y
+                if (rect.width > 300) {
+                    ctx.fillStyle = 'rgba(155, 160, 188, 0.7)';
+                    ctx.font = `${fontSize}px Arial`;
+                    ctx.textAlign = 'right';
+                    ctx.textBaseline = 'middle';
+                    const formatter = formatters[CHART_CONFIG.formatter];
+                    ctx.fillText(formatter(value), baselineX - 5, y);
+                }
+            }
+
+            // Вертикальные линии сетки и подписи оси X
+            const dataLength = CHART_DATA.dates.length;
+            if (dataLength > 0) {
+                const availableWidth = graphWidth / dataLength;
+                let skipFactor = 1;
+                if (availableWidth < 50) skipFactor = 2;
+                if (availableWidth < 30) skipFactor = 3;
+
+                for (let i = 0; i < dataLength; i++) {
+                    const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
+
+                    ctx.moveTo(x, padding.top);
+                    ctx.lineTo(x, baselineY);
+
+                    // Подписи дат
+                    if (i % skipFactor === 0 || i === dataLength - 1) {
+                        ctx.fillStyle = 'rgba(155, 160, 188, 0.9)';
+                        ctx.font = `${fontSize}px Arial`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'top';
+                        ctx.fillText(CHART_DATA.dates[i], x, baselineY + 5);
+                    }
+                }
+            }
+
+            ctx.stroke();
+
+            // Базовая линия
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(155, 160, 188, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.moveTo(padding.left, baselineY);
+            ctx.lineTo(padding.left + graphWidth, baselineY);
+            ctx.stroke();
+
+            chartState.axesDrawn = true;
+        }
+
+        function drawBars(animationProgress = 1) {
+            if (!chartState.axesDrawn) {
+                drawAxes();
+            }
+
+            const ctx = chartState.ctx;
+            const rect = chartState.canvas.getBoundingClientRect();
+            const padding = chartState.layout.padding;
+            const graphWidth = chartState.layout.graphArea.width;
+            const graphHeight = chartState.layout.graphArea.height;
+            const maxValue = getMaxValue();
+            const baselineY = rect.height - padding.bottom;
+            const dataLength = CHART_DATA.dates.length;
+
+            chartState.bars = [];
+
+            if (!CHART_DATA.dates || dataLength === 0) {
+                chartState.noDataMessage.style.display = 'block';
+                return;
+            }
+
+            chartState.noDataMessage.style.display = 'none';
+
+            if (CHART_CONFIG.type === 'dual_bars') {
+                drawDualBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress);
+            } else {
+                drawSingleBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress);
+            }
+        }
+
+        function drawDualBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress) {
+            const maxBarWidth = 40;
+            let barWidth = Math.min((graphWidth / dataLength) * 0.7, maxBarWidth);
+            const barGap = Math.max(1, Math.min(2, barWidth * 0.1));
+            const halfBarWidth = barWidth / 2;
+            const singleBarWidth = (barWidth - barGap) / 2;
+
+            for (let i = 0; i < dataLength; i++) {
+                const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
+                const barX = x - halfBarWidth;
+
+                const victories = CHART_DATA.victories ? (CHART_DATA.victories[i] || 0) : 0;
+                const defeats = CHART_DATA.defeats ? (CHART_DATA.defeats[i] || 0) : 0;
+                const date = CHART_DATA.dates[i];
+
+                const victoryHeight = (victories / maxValue) * graphHeight * animationProgress;
+                const defeatHeight = (defeats / maxValue) * graphHeight * animationProgress;
+
+                // Столбец побед
+                const victoryGradient = ctx.createLinearGradient(0, baselineY - victoryHeight, 0, baselineY);
+                victoryGradient.addColorStop(0, 'rgba(66, 225, 137, 1)');
+                victoryGradient.addColorStop(1, 'rgba(66, 225, 137, 0.7)');
+
+                ctx.fillStyle = victoryGradient;
+                const victoryRect = {
+                    x: barX,
+                    y: baselineY - victoryHeight,
+                    width: singleBarWidth,
+                    height: Math.max(1, victoryHeight),
+                    type: 'victory',
+                    value: victories,
+                    date: date,
+                    index: i
+                };
+
+                drawRoundedBar(ctx, victoryRect);
+                chartState.bars.push(victoryRect);
+
+                // Столбец поражений
+                const defeatGradient = ctx.createLinearGradient(0, baselineY - defeatHeight, 0, baselineY);
+                defeatGradient.addColorStop(0, 'rgba(255, 107, 108, 1)');
+                defeatGradient.addColorStop(1, 'rgba(255, 107, 108, 0.7)');
+
+                ctx.fillStyle = defeatGradient;
+                const defeatRect = {
+                    x: barX + singleBarWidth + barGap,
+                    y: baselineY - defeatHeight,
+                    width: singleBarWidth,
+                    height: Math.max(1, defeatHeight),
+                    type: 'defeat',
+                    value: defeats,
+                    date: date,
+                    index: i
+                };
+
+                drawRoundedBar(ctx, defeatRect);
+                chartState.bars.push(defeatRect);
+            }
+        }
+
+        function drawSingleBars(ctx, padding, graphWidth, graphHeight, maxValue, baselineY, dataLength, animationProgress) {
+            const maxBarWidth = 60;
+            let barWidth = Math.min((graphWidth / dataLength) * 0.8, maxBarWidth);
+            const dataKey = CHART_CONFIG.data_keys[0];
+
+            const primaryColor = CHART_CONFIG.colors.primary;
+            const rgbColor = hexToRgb(primaryColor);
+
+            for (let i = 0; i < dataLength; i++) {
+                const x = padding.left + ((i + 0.5) * (graphWidth / dataLength));
+                const barX = x - (barWidth / 2);
+
+                const value = CHART_DATA[dataKey] ? (CHART_DATA[dataKey][i] || 0) : 0;
+                const date = CHART_DATA.dates[i];
+                const barHeight = (value / maxValue) * graphHeight * animationProgress;
+
+                const gradient = ctx.createLinearGradient(0, baselineY - barHeight, 0, baselineY);
+                gradient.addColorStop(0, `rgba(${rgbColor.r}, ${rgbColor.g}, ${rgbColor.b}, 1)`);
+                gradient.addColorStop(1, `rgba(${rgbColor.r}, ${rgbColor.g}, ${rgbColor.b}, 0.7)`);
+
+                ctx.fillStyle = gradient;
+                const rect = {
+                    x: barX,
+                    y: baselineY - barHeight,
+                    width: barWidth,
+                    height: Math.max(1, barHeight),
+                    value: value,
+                    date: date,
+                    index: i
+                };
+
+                drawRoundedBar(ctx, rect);
+
+                // Блик
+                const highlightWidth = barWidth * 0.4;
+                const highlightGradient = ctx.createLinearGradient(
+                    rect.x + barWidth * 0.3, rect.y,
+                    rect.x + barWidth * 0.3 + highlightWidth, rect.y
+                );
+                highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+                highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                ctx.fillStyle = highlightGradient;
+                ctx.beginPath();
+                ctx.rect(rect.x + barWidth * 0.3, rect.y, highlightWidth, rect.height);
+                ctx.fill();
+
+                chartState.bars.push(rect);
+            }
+        }
+
+        function drawRoundedBar(ctx, rect) {
+            const radius = Math.min(3, rect.width / 4);
+
+            ctx.beginPath();
+            ctx.moveTo(rect.x + radius, rect.y);
+            ctx.lineTo(rect.x + rect.width - radius, rect.y);
+            ctx.quadraticCurveTo(rect.x + rect.width, rect.y, rect.x + rect.width, rect.y + radius);
+            ctx.lineTo(rect.x + rect.width, rect.y + rect.height);
+            ctx.lineTo(rect.x, rect.y + rect.height);
+            ctx.lineTo(rect.x, rect.y + radius);
+            ctx.quadraticCurveTo(rect.x, rect.y, rect.x + radius, rect.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : {r: 255, g: 255, b: 255};
+        }
+
+        function handleMouseMove(event) {
+            const canvas = chartState.canvas;
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            let hoveredBar = null;
+
+            for (const bar of chartState.bars) {
+                if (x >= bar.x && x <= bar.x + bar.width && y >= bar.y && y <= bar.y + bar.height) {
+                    hoveredBar = bar;
+                    break;
+                }
+            }
+
+            if (hoveredBar && hoveredBar !== chartState.hoveredBar) {
+                const tooltip = chartState.tooltip;
+                tooltip.style.display = 'block';
+
+                let tooltipX = Math.min(x + 10, canvas.clientWidth - 150);
+                let tooltipY = Math.max(y - 10, 10);
+
+                if (y > canvas.clientHeight - 80) {
+                    tooltipY = y - 70;
+                }
+
+                tooltip.style.left = tooltipX + 'px';
+                tooltip.style.top = tooltipY + 'px';
+
+                const formatter = formatters[CHART_CONFIG.formatter];
+                const valueText = formatter(hoveredBar.value);
+
+                if (CHART_CONFIG.type === 'dual_bars') {
+                    const typeText = hoveredBar.type === 'victory' ? 'Победы' : 'Поражения';
+                    tooltip.innerHTML = `<strong>${hoveredBar.date}</strong>${typeText}: ${valueText}`;
+                } else {
+                    let label = 'Значение';
+                    if (CHART_CONFIG.data_keys[0] === 'keys_collected') {
+                        label = 'Собрано ключей';
+                    } else if (CHART_CONFIG.data_keys[0] === 'silver_collected') {
+                        label = 'Собрано серебра';
+                    }
+                    tooltip.innerHTML = `<strong>${hoveredBar.date}</strong>${label}: ${valueText}`;
+                }
+
+                chartState.hoveredBar = hoveredBar;
+            } else if (!hoveredBar && chartState.hoveredBar) {
+                chartState.tooltip.style.display = 'none';
+                chartState.hoveredBar = null;
+            }
+        }
+
+        function handleMouseLeave() {
+            chartState.tooltip.style.display = 'none';
+            chartState.hoveredBar = null;
+        }
+
+        function animateChart(timestamp) {
+            if (!chartState.animation.isAnimating) return;
+
+            if (!chartState.animation.startTime) {
+                chartState.animation.startTime = timestamp;
+            }
+
+            const elapsed = timestamp - chartState.animation.startTime;
+            let progress = Math.min(1, elapsed / 800); // 800ms анимация
+            const easeProgress = 1 - Math.pow(1 - progress, 3); // Кубическое замедление
+
+            drawBars(easeProgress);
+
+            if (progress < 1) {
+                requestAnimationFrame(animateChart);
+            } else {
+                chartState.animation.isAnimating = false;
+            }
+        }
+
+        function setupEventListeners() {
+            const canvas = chartState.canvas;
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseleave', handleMouseLeave);
+
+            window.addEventListener('resize', () => {
+                clearTimeout(window.resizeTimeout);
+                window.resizeTimeout = setTimeout(() => {
+                    chartState.axesDrawn = false;
+                    drawAxes();
+                    drawBars(1);
+                }, 150);
+            });
+        }
+
+        function initializeChart() {
+            drawAxes(); // Сначала всегда рисуем оси
+
+            if (SHOULD_ANIMATE) {
+                chartState.animation.isAnimating = true;
+                chartState.animation.startTime = 0;
+                requestAnimationFrame(animateChart);
+            } else {
+                drawBars(1);
+            }
+
+            setupEventListeners();
+        }
+
+        // Функция для обновления данных (вызывается из Python)
+        window.updateChartData = function(newData) {
+            Object.assign(CHART_DATA, newData);
+            chartState.axesDrawn = false;
+            drawAxes();
+            drawBars(1); // Обновление без анимации
+        };
+
+        // Инициализация после загрузки DOM
+        window.addEventListener('load', () => {
+            setTimeout(initializeChart, 50);
+        });
+    </script>
+</body>
+</html>
